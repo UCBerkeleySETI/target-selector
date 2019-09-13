@@ -1,66 +1,29 @@
-import signal
+#!/usr/bin/env pythoni
+
+from optparse import OptionParser
 import sys
 import time
 import logging
-from mk_target_selector.logger import log, set_logger, intro_message
-from mk_target_selector.mk_redis import Listen
+from mk_target_selector.logger import log, set_logger
+from astropy.config import reload_config, get_config_dir
+from mk_target_selector.target_selector import Target_Selector
 
+def start(config):
+    log = set_logger(log_level=logging.INFO)
+    ts = Target_Selector(True, config)
+    ts.run()
+    while True:
+        time.sleep(1)
 
-class Target_Selector:
-    """
-    Class that handles/organizes the target_selector classes into a runnable
-    format. Includes debugging, logging, and redis Listener for the
-    meerkat_target_selector
-    """
-    def __init__(self, debug = True):
-        """target selector run script. Includes debugging.
-        """
-        if debug:
-            # note: debug logging will only go to logfile
-            log_level = logging.DEBUG
-        else:
-            log_level = logging.INFO
-
-        self.log = set_logger(log_level)
-        signal.signal(signal.SIGINT, lambda signal, frame: self._signal_handler())
-        self.target_client = Listen()
-        self.target_client.daemon = True
-        self.proc_client = Listen('processing')
-        self.proc_client.daemon = True
-
-    def _signal_handler(self):
-        """Handles the shutdown of the meerkat_target_selector
-
-        Parameters:
-            None
-
-        Returns:
-            None
-        """
-        # TODO: uncomment when you deploy
-        # notify_slack("Target Selector module at MeerKAT has halted. Plase restart!")
-        self.log.info("Shutting Down Target Selector")
-        sys.exit()
-
-    def run(self):
-        """Main script to run the meerkat_target_selector from the command line
-
-        Parameters:
-            None
-
-        Returns:
-            None
-        """
-        self.log.info("Starting Target Selector Client")
-        print (intro_message)
-        try:
-            self.target_client.start()
-            self.proc_client.start()
-        except KeyboardInterrupt:
-            self._signal_handler()
+def cli(prog = sys.argv[0]):
+    usage = 'usage: %prog [options]'
+    parser = OptionParser(usage = usage)
+    parser.add_option('-c', '--config', type = str,
+                     help = 'Config file (yaml)', default = 'target_selector.yml')
+    (opts, args) = parser.parse_args()
+    start(config = opts.config)
 
 if __name__ == '__main__':
-    ts = Target_Selector()
-    ts.run()
+    cli()
     while True:
         time.sleep(1)

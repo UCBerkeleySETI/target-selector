@@ -2,7 +2,7 @@ import logging
 
 def get_logger():
     """Get the logger."""
-    return logging.getLogger("Target Selection Interface")
+    return logging.getLogger("BLUSE.interface")
 
 
 log = get_logger()

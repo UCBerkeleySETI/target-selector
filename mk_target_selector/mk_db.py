@@ -1,3 +1,4 @@
+import os
 import yaml
 import numpy as np
 import pandas as pd
@@ -21,7 +22,7 @@ class Database_Handler(object):
         >>> db = Database_Handler()
         >>> db.select_targets(c_ra, c_dec, beam_rad)
     """
-    def __init__(self, config_file = 'config.yml'):
+    def __init__(self, config_file):
         """
         __init__ function for the DataBase_Handler class
 
@@ -35,7 +36,6 @@ class Database_Handler(object):
         self.cfg = self.configure_settings(config_file)
         #self.priority_sources = np.array(self.cfg['priority_sources'])
         self.conn = self.connect_to_db(self.cfg['mysql'])
-
 
     def configure_settings(self, config_file):
         """Sets configuration settings
@@ -55,7 +55,6 @@ class Database_Handler(object):
                     return cfg
                 except yaml.YAMLError as E:
                     logger.error(E)
-
         except IOError:
             logger.error('Config file not found')
 
@@ -88,10 +87,6 @@ class Database_Handler(object):
         self.conn.close()
         self.engine.dispose()
 
-
-
-
-
 class Triage(Database_Handler):
     """
 
@@ -105,7 +100,7 @@ class Triage(Database_Handler):
     "sensor_alerts" channels on the Redis server. Depending on the which message
     that passes over which channel, various processes are run:
     """
-    def __init__(self, config_file = 'config.yml'):
+    def __init__(self, config_file):
         super(Triage, self).__init__(config_file)
 
     def add_sources_to_db(self, df, start_time, end_time, proxies, antennas,

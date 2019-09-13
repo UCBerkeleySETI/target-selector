@@ -1,3 +1,4 @@
+import os
 import re
 import json
 import yaml
@@ -7,6 +8,7 @@ import numpy as np
 from datetime import datetime
 from astropy import units as u
 from astropy.coordinates import Angle, SkyCoord
+from astropy.config import get_config_dir
 
 try:
     from .logger import log as logger
@@ -56,7 +58,8 @@ class Listen(threading.Thread):
         1. Listen for a success message from the processing nodes. Once this
            success/failure message has been returned, then add to the database.
     """
-    def __init__(self, chan = ['sensor_alerts', 'alerts']):
+    def __init__(self, chan = ['sensor_alerts', 'alerts'], config_file = 'target_selector.yml'):
+     
         threading.Thread.__init__(self)
 
         # Initialize redis connection
@@ -67,7 +70,7 @@ class Listen(threading.Thread):
         self.p.psubscribe(chan)
 
         # Database connection and triaging
-        self.engine = Triage()
+        self.engine = Triage(config_file)
 
         self.sensor_info = {}
 

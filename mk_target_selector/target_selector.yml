@@ -1,0 +1,6 @@
+mysql:
+  database: breakthrough_db
+  drivername: mysql
+  host: localhost
+  password: bluse42
+  username: root

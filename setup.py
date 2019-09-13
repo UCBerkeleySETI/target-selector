@@ -26,5 +26,13 @@ setuptools.setup(
     install_requires=requires,
     packages=[
         'mk_target_selector'
+        ],
+    py_modules = [
+        'target_selector_start',
+        ],
+    entry_points = {
+        'console_scripts': [
+            'target_selector_start = target_selector_start:cli',
         ]
+    },
 )
