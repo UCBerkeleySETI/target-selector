@@ -1,0 +1,3 @@
+[console_scripts]
+target_selector_start = target_selector_start:cli
+

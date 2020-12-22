@@ -1,17 +1,17 @@
 import setuptools
 
 requires = [
-    "astropy==2.0.12",
-    "setuptools==41.0.0",
-    "SQLAlchemy==1.3.4",
-    "redis==2.10.6",
-    "pandas==0.24.2",
-    "slacker==0.9.65",
-    "numpy==1.16.2",
-    "credentials==1.1",
-    "python_dateutil==2.8.0",
-    "PyYAML==5.1.2",
-    "mysqlclient==1.4.4"
+    "astropy>=2.0.12",
+#    "setuptools>=41.0.0",
+    "SQLAlchemy>=1.3.4",
+    "redis>=2.10.6",
+    "pandas>=0.24.2",
+#    "slacker>=0.9.65",
+    "numpy>=1.16.2",
+#    "credentials>=1.1",
+    "python_dateutil>=2.8.0",
+    "PyYAML>=5.1.2",
+    "mysqlclient>=1.4.4"
 ]
 
 setuptools.setup(

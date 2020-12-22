@@ -89,8 +89,8 @@ def main(user, password, host, schema_name):
 
     source_table_name = 'target_list'
     obs_table_name = 'observation_status'
-    url = URL(**cred)
-    engine = create_engine(name_or_url = url)
+    url = URL.create(**cred)
+    engine = create_engine(url)
     engine.execute('CREATE DATABASE IF NOT EXISTS {};'.format(schema_name))
     engine.execute('USE {};'.format(schema_name))
 

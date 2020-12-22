@@ -238,15 +238,12 @@ class Triage(Database_Handler):
             tb: (pandas.DataFrame)
                 table containing the sources to be beamformed on
         """
-
         priority = np.ones(tb.shape[0], dtype=int)
 
         query = 'SELECT DISTINCT source_id \
                  FROM {}'.format(table)
-        print("Query: ", query, "\n") # TRYING TO FIGURE STUFF OUT
 
         # TODO replace these with sqlalchemy queries
-
         source_ids = pd.read_sql(query, con = self.conn)
         priority[tb['source_id'].isin(source_ids['source_id'])] += 1
         #priority[tb['source_id'].isin(self.priority_sources)] = 0
@@ -254,7 +251,7 @@ class Triage(Database_Handler):
         return tb.sort_values('priority')
 
     def select_targets(self, c_ra, c_dec, beam_rad, table = 'target_list',
-                       cols = ['ra', 'decl', 'source_id', 'project', 'distc']):
+                       cols = ['ra', 'decl', 'source_id', 'Project']):
         """Returns a string to query the 1 million star database to find sources
            within some primary beam area
 
@@ -284,14 +281,9 @@ class Triage(Database_Handler):
                 COS({c_dec}) * COS({c_ra} - RADIANS(ra))) < {beam_rad}; \
                 """.format(mask = mask, c_ra = c_ra,
                            c_dec = c_dec, beam_rad = beam_rad)
-        print("Query: ", query, "\n")
 
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con = self.conn)
-        sorting_priority = self.triage(tb)
-        source_list = sorting_priority.sort_values(by=['priority', 'distc'])
-        print("Source list:\n", source_list, "\n") # TESTING
-        return source_list
+        source_list = self.triage(tb)
 
-        #source_list = self.triage(tb)
-        #return source_list
+        return source_list
