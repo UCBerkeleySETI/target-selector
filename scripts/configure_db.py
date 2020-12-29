@@ -23,7 +23,11 @@ from argparse import (
     ArgumentDefaultsHelpFormatter
 )
 
-data_link = 'https://www.dropbox.com/s/yklypkckc6m2xx1/1_million_sample_complete.csv?dl=1'
+# link to 1m star database
+data_link = 'https://www.dropbox.com/s/84l8yaubwy19uoq/1_million_sample_complete.csv?dl=1'
+
+# link to calibrator database 
+data_link_cal = 'https://www.dropbox.com/s/wbu9znjtwonlsgu/calibrator_list.csv?dl=1'
 
 Base = declarative_base()
 class Observation(Base):
@@ -88,6 +92,7 @@ def main(user, password, host, schema_name):
             'drivername': 'mysql'}
 
     source_table_name = 'target_list'
+    cal_table_name = 'calibrator_list'
     obs_table_name = 'observation_status'
     url = URL.create(**cred)
     engine = create_engine(url)
@@ -97,7 +102,6 @@ def main(user, password, host, schema_name):
     # Create config file
     cred['database'] = schema_name
     write_yaml(cred)
-
 
     if not engine.dialect.has_table(engine, source_table_name):
         print ('Creating table: {}'.format(source_table_name))
@@ -110,6 +114,18 @@ def main(user, password, host, schema_name):
 
     else:
         print ('Table with the name, {}, already exists. Could not create table.'.format(source_table_name))
+
+    if not engine.dialect.has_table(engine, cal_table_name):
+        print ('Creating table: {}'.format(cal_table_name))
+        tb = pd.read_csv(data_link_cal)
+        tb.to_sql(cal_table_name, engine, index = False,
+                  if_exists = 'replace', chunksize = None)
+        engine.execute('CREATE INDEX target_list_loc_idx ON \
+                        {}.{} (ra, decl)'.format(schema_name, cal_table_name))
+        del tb
+
+    else:
+        print ('Table with the name, {}, already exists. Could not create table.'.format(cal_table_name))
 
     if not engine.dialect.has_table(engine, obs_table_name):
         print ('Creating table: {}'.format(obs_table_name))

@@ -215,8 +215,19 @@ class Triage(Database_Handler):
         bounds = np.rad2deg([ra_min, ra_max, dec_min, dec_max])
 
         query = """
+                (SELECT {cols}
+                 FROM calibrator_list
+                 ORDER BY dist_c asc
+                 LIMIT 1
+                ) UNION 
                 SELECT {cols}
                 FROM {table}
+                # UNION 
+                # SELECT {cols}
+                # FROM 26m_sources
+                # UNION 
+                # SELECT {cols}
+                # FROM adhoc_sources
                 WHERE ({ra_min} < ra  AND ra < {ra_max}) AND
                       ({dec_min} < decl AND decl < {dec_max})\
                 """.format(cols = ', '.join(cols), table = table,
@@ -249,12 +260,15 @@ class Triage(Database_Handler):
 
         source_ids = pd.read_sql(query, con = self.conn)
         priority[tb['source_id'].isin(source_ids['source_id'])] += 1
-        #priority[tb['source_id'].isin(self.priority_sources)] = 0
+
+        priority[tb['table_name'].str.contains('calibrator')] = 0
+        # priority[tb['table_name'].str.contains('adhoc')] = 0
+        # priority[tb['table_name'].str.contains('targets_26m')] = 2
+
         tb['priority'] = priority
         return tb.sort_values('priority')
 
-    def select_targets(self, c_ra, c_dec, beam_rad, table = 'target_list',
-                       cols = ['ra', 'decl', 'source_id', 'project', 'distc']):
+    def select_targets(self, c_ra, c_dec, beam_rad, table = 'target_list', cols = ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']):
         """Returns a string to query the 1 million star database to find sources
            within some primary beam area
 
@@ -289,7 +303,7 @@ class Triage(Database_Handler):
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con = self.conn)
         sorting_priority = self.triage(tb)
-        source_list = sorting_priority.sort_values(by=['priority', 'distc'])
+        source_list = sorting_priority.sort_values(by=['priority', 'dist_c'])
         print("Source list:\n", source_list, "\n") # TESTING
         return source_list
 
