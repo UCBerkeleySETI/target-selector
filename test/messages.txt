@@ -14,7 +14,7 @@ FENCHAN=4096
 HNCHAN=512
 HNTIME=256
 capture-init:array_1
-array_1:target:radec, 8:25:26.87, -50:10:38.0
+array_1:target:radec, 11:30:00.20, 45:00:00.2
 array_1:subarray_1_pool_resources
 capture-start:array_1
 NETSTAT=RECORD

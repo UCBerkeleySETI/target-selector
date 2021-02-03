@@ -1,7 +1,13 @@
 import os
 import yaml
+import subprocess
 import numpy as np
 import pandas as pd
+import matplotlib #for location plot
+matplotlib.use('Agg') #for location plot
+import matplotlib.pyplot as plt #for location plot
+import astropy.coordinates as coord #for location plot
+import astropy.units as u #for location plot
 from dateutil import parser
 from datetime import datetime
 from sqlalchemy import create_engine
@@ -304,8 +310,36 @@ class Triage(Database_Handler):
         tb = pd.read_sql(query, con = self.conn)
         sorting_priority = self.triage(tb)
         source_list = sorting_priority.sort_values(by=['priority', 'dist_c'])
-        print("Source list:\n", source_list, "\n") # TESTING
+        self.output_targets(source_list, c_ra, c_dec)
         return source_list
 
-        #source_list = self.triage(tb)
-        #return source_list
+    def output_targets(self, source_list, c_ra, c_dec):
+        """Function to plot selected targets & output the source list
+
+        Parameters:
+            source_list : DataFrame
+                A pandas DataFrame containing the objects meeting the filter
+                criteria
+            c_ra, c_dec : float
+                Pointing coordinates of the telescope in radians
+        Returns:
+            None
+        """
+
+        # TESTING plot locations of target sources
+        ra_plot = coord.Angle(source_list['ra']*u.degree)
+        ra_plot = ra_plot.wrap_at(180*u.degree)
+        dec_plot = coord.Angle(source_list['decl']*u.degree)
+        location_fig = plt.figure(figsize=(8,6))
+        ax = location_fig.add_subplot(111, projection="mollweide")
+        ax.scatter(ra_plot.radian, dec_plot.radian, marker="+")
+        ax.grid(True)
+
+        location_fig.savefig("test_plot.pdf")
+        subprocess.Popen('open %s' % "test_plot.pdf", shell=True)
+        pointing_coord = coord.SkyCoord(ra = c_ra*u.rad, dec = c_dec*u.rad, frame='icrs')
+        print("Plot of targets for pointing coordinates (", pointing_coord.ra.to_string(unit=u.hour, sep=':'),",", pointing_coord.dec.to_string(unit=u.degree, sep=':'), ") saved successfully.\n")
+
+        # TESTING print source list
+        print("Source list:\n", source_list, "\n")
+        return source_list
