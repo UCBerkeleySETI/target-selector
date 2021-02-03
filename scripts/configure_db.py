@@ -27,7 +27,7 @@ from argparse import (
 data_link = 'https://www.dropbox.com/s/84l8yaubwy19uoq/1_million_sample_complete.csv?dl=1'
 
 # link to calibrator database 
-data_link_cal = 'https://www.dropbox.com/s/wbu9znjtwonlsgu/calibrator_list.csv?dl=1'
+data_link_cal = 'https://www.dropbox.com/s/txrp6hak5qgmz50/atca_calibrator_database_v3.csv?dl=1'
 
 Base = declarative_base()
 class Observation(Base):
@@ -36,7 +36,8 @@ class Observation(Base):
     """
     __tablename__ = 'observation_status'
     rowid = Column(INT, primary_key = True)
-    source_id = Column(BIGINT)
+    #source_id = Column(BIGINT)
+    source_id = Column(Text)
     antennas = Column(Text)
     proxies = Column(Text)
     bands = Column(VARCHAR(45))
@@ -103,18 +104,6 @@ def main(user, password, host, schema_name):
     cred['database'] = schema_name
     write_yaml(cred)
 
-    if not engine.dialect.has_table(engine, source_table_name):
-        print ('Creating table: {}'.format(source_table_name))
-        tb = pd.read_csv(data_link)
-        tb.to_sql(source_table_name, engine, index = False,
-                  if_exists = 'replace', chunksize = None)
-        engine.execute('CREATE INDEX target_list_loc_idx ON \
-                        {}.{} (ra, decl)'.format(schema_name, source_table_name))
-        del tb
-
-    else:
-        print ('Table with the name, {}, already exists. Could not create table.'.format(source_table_name))
-
     if not engine.dialect.has_table(engine, cal_table_name):
         print ('Creating table: {}'.format(cal_table_name))
         tb = pd.read_csv(data_link_cal)
@@ -133,6 +122,18 @@ def main(user, password, host, schema_name):
     else:
         engine.execute('DROP TABLE {}.{}'.format(schema_name, obs_table_name))
         Base.metadata.create_all(engine)
+
+    if not engine.dialect.has_table(engine, source_table_name):
+        print ('Creating table: {}'.format(source_table_name))
+        tb = pd.read_csv(data_link)
+        tb.to_sql(source_table_name, engine, index = False,
+                  if_exists = 'replace', chunksize = None)
+        engine.execute('CREATE INDEX target_list_loc_idx ON \
+                        {}.{} (ra, decl)'.format(schema_name, source_table_name))
+        del tb
+
+    else:
+        print ('Table with the name, {}, already exists. Could not create table.'.format(source_table_name))
 
 if __name__ == '__main__':
     cli()

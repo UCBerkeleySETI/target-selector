@@ -223,7 +223,6 @@ class Triage(Database_Handler):
         query = """
                 (SELECT {cols}
                  FROM calibrator_list
-                 ORDER BY dist_c asc
                  LIMIT 1
                 ) UNION 
                 SELECT {cols}

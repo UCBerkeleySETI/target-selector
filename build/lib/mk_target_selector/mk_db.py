@@ -1,7 +1,13 @@
 import os
 import yaml
+import subprocess
 import numpy as np
 import pandas as pd
+import matplotlib #for location plot
+matplotlib.use('Agg') #for location plot
+import matplotlib.pyplot as plt #for location plot
+import astropy.coordinates as coord #for location plot
+import astropy.units as u #for location plot
 from dateutil import parser
 from datetime import datetime
 from sqlalchemy import create_engine
@@ -215,8 +221,19 @@ class Triage(Database_Handler):
         bounds = np.rad2deg([ra_min, ra_max, dec_min, dec_max])
 
         query = """
+                (SELECT {cols}
+                 FROM calibrator_list
+                 ORDER BY dist_c asc
+                 LIMIT 1
+                ) UNION 
                 SELECT {cols}
                 FROM {table}
+                # UNION 
+                # SELECT {cols}
+                # FROM 26m_sources
+                # UNION 
+                # SELECT {cols}
+                # FROM adhoc_sources
                 WHERE ({ra_min} < ra  AND ra < {ra_max}) AND
                       ({dec_min} < decl AND decl < {dec_max})\
                 """.format(cols = ', '.join(cols), table = table,
@@ -238,20 +255,26 @@ class Triage(Database_Handler):
             tb: (pandas.DataFrame)
                 table containing the sources to be beamformed on
         """
+
         priority = np.ones(tb.shape[0], dtype=int)
 
         query = 'SELECT DISTINCT source_id \
                  FROM {}'.format(table)
+        print("Query: ", query, "\n") # TRYING TO FIGURE STUFF OUT
 
         # TODO replace these with sqlalchemy queries
+
         source_ids = pd.read_sql(query, con = self.conn)
         priority[tb['source_id'].isin(source_ids['source_id'])] += 1
-        #priority[tb['source_id'].isin(self.priority_sources)] = 0
+
+        priority[tb['table_name'].str.contains('calibrator')] = 0
+        # priority[tb['table_name'].str.contains('adhoc')] = 0
+        # priority[tb['table_name'].str.contains('targets_26m')] = 2
+
         tb['priority'] = priority
         return tb.sort_values('priority')
 
-    def select_targets(self, c_ra, c_dec, beam_rad, table = 'target_list',
-                       cols = ['ra', 'decl', 'source_id', 'Project']):
+    def select_targets(self, c_ra, c_dec, beam_rad, table = 'target_list', cols = ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']):
         """Returns a string to query the 1 million star database to find sources
            within some primary beam area
 
@@ -281,9 +304,42 @@ class Triage(Database_Handler):
                 COS({c_dec}) * COS({c_ra} - RADIANS(ra))) < {beam_rad}; \
                 """.format(mask = mask, c_ra = c_ra,
                            c_dec = c_dec, beam_rad = beam_rad)
+        print("Query: ", query, "\n")
 
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con = self.conn)
-        source_list = self.triage(tb)
+        sorting_priority = self.triage(tb)
+        source_list = sorting_priority.sort_values(by=['priority', 'dist_c'])
+        self.output_targets(source_list, c_ra, c_dec)
+        return source_list
 
+    def output_targets(self, source_list, c_ra, c_dec):
+        """Function to plot selected targets & output the source list
+
+        Parameters:
+            source_list : DataFrame
+                A pandas DataFrame containing the objects meeting the filter
+                criteria
+            c_ra, c_dec : float
+                Pointing coordinates of the telescope in radians
+        Returns:
+            None
+        """
+
+        # TESTING plot locations of target sources
+        ra_plot = coord.Angle(source_list['ra']*u.degree)
+        ra_plot = ra_plot.wrap_at(180*u.degree)
+        dec_plot = coord.Angle(source_list['decl']*u.degree)
+        location_fig = plt.figure(figsize=(8,6))
+        ax = location_fig.add_subplot(111, projection="mollweide")
+        ax.scatter(ra_plot.radian, dec_plot.radian, marker="+")
+        ax.grid(True)
+
+        location_fig.savefig("test_plot.pdf")
+        subprocess.Popen('open %s' % "test_plot.pdf", shell=True)
+        pointing_coord = coord.SkyCoord(ra = c_ra*u.rad, dec = c_dec*u.rad, frame='icrs')
+        print("Plot of targets for pointing coordinates (", pointing_coord.ra.to_string(unit=u.hour, sep=':'),",", pointing_coord.dec.to_string(unit=u.degree, sep=':'), ") saved successfully.\n")
+
+        # TESTING print source list
+        print("Source list:\n", source_list, "\n")
         return source_list
