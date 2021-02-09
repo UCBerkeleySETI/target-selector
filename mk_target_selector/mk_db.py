@@ -221,20 +221,17 @@ class Triage(Database_Handler):
         bounds = np.rad2deg([ra_min, ra_max, dec_min, dec_max])
 
         query = """
-                (SELECT {cols}
-                 FROM calibrator_list
-                 LIMIT 1
-                ) UNION 
+                #(SELECT {cols}
+                # FROM calibrator_list
+                # LIMIT 1
+                #) UNION
                 SELECT {cols}
                 FROM {table}
                 # UNION 
                 # SELECT {cols}
-                # FROM 26m_sources
-                # UNION 
-                # SELECT {cols}
                 # FROM adhoc_sources
                 WHERE ({ra_min} < ra  AND ra < {ra_max}) AND
-                      ({dec_min} < decl AND decl < {dec_max})\
+                      ({dec_min} < decl AND decl < {dec_max})
                 """.format(cols = ', '.join(cols), table = table,
                            ra_min = bounds[0], ra_max = bounds[1],
                            dec_min = bounds[2], dec_max = bounds[3])
@@ -257,20 +254,43 @@ class Triage(Database_Handler):
 
         priority = np.ones(tb.shape[0], dtype=int)
 
-        query = 'SELECT DISTINCT source_id \
-                 FROM {}'.format(table)
-        print("Query: ", query, "\n") # TRYING TO FIGURE STUFF OUT
+        query = """
+                SELECT source_id, bands, duration 
+                FROM {} AS obs
+                WHERE 
+                    (SELECT COUNT(*) 
+                            FROM {} AS obs_max
+                            WHERE obs_max.source_id = obs.source_id AND obs_max.bands = obs.bands AND obs_max.duration > obs.duration
+                    ) = 0
+                """.format(table, table)
+
+        #query = 'SELECT DISTINCT source_id FROM {}'.format(table)
+        logger.info('Query:\n {}'.format(query)) # TRYING TO FIGURE STUFF OUT
 
         # TODO replace these with sqlalchemy queries
 
-        source_ids = pd.read_sql(query, con = self.conn)
-        priority[tb['source_id'].isin(source_ids['source_id'])] += 1
+        prevObs = pd.read_sql(query, con = self.conn)
+        print(prevObs,"\n")
+        priority[tb['source_id'].isin(prevObs['source_id'])] = 5
 
-        priority[tb['table_name'].str.contains('calibrator')] = 0
+        # source observed for < 5 minutes
+        longestObs = prevObs.groupby('source_id')['duration'].max()
+        for m in tb['source_id']:
+            try:
+                longestObs[m]
+                if longestObs[m] < 300:
+                    priority[tb['source_id'] == m] = 3
+            except:
+                continue
+
+        # priority[tb['table_name'].str.contains('calibrator')] = 0
         # priority[tb['table_name'].str.contains('adhoc')] = 0
-        # priority[tb['table_name'].str.contains('targets_26m')] = 2
+        # priority[tb['table_name'].str.contains('exotica')] = 2
+        # priority[tb['table_name'].str.contains('part_observed')] = 3
+        # priority[tb['table_name'].str.contains('freq_observed')] = 4
 
         tb['priority'] = priority
+
         return tb.sort_values('priority')
 
     def select_targets(self, c_ra, c_dec, beam_rad, table = 'target_list', cols = ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']):
@@ -289,34 +309,34 @@ class Triage(Database_Handler):
                 Name of the table that is being queried
 
         Returns:
-            source_list : DataFrame
+            target_list : DataFrame
                 Returns a pandas DataFrame containing the objects meeting the filter
                 criteria
 
         """
         mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols)
 
-        query = """\
+        query = """
                 SELECT *
                 FROM ({mask}) as T
                 WHERE ACOS( SIN(RADIANS(decl)) * SIN({c_dec}) + COS(RADIANS(decl)) *
                 COS({c_dec}) * COS({c_ra} - RADIANS(ra))) < {beam_rad}; \
                 """.format(mask = mask, c_ra = c_ra,
                            c_dec = c_dec, beam_rad = beam_rad)
-        print("Query: ", query, "\n")
+        logger.info('Query:\n {}\n'.format(query))
 
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con = self.conn)
         sorting_priority = self.triage(tb)
-        source_list = sorting_priority.sort_values(by=['priority', 'dist_c'])
-        self.output_targets(source_list, c_ra, c_dec)
-        return source_list
+        target_list = sorting_priority.sort_values(by=['priority', 'dist_c'])
+        self.output_targets(target_list, c_ra, c_dec)
+        return target_list
 
-    def output_targets(self, source_list, c_ra, c_dec):
+    def output_targets(self, target_list, c_ra, c_dec):
         """Function to plot selected targets & output the source list
 
         Parameters:
-            source_list : DataFrame
+            target_list : DataFrame
                 A pandas DataFrame containing the objects meeting the filter
                 criteria
             c_ra, c_dec : float
@@ -326,19 +346,19 @@ class Triage(Database_Handler):
         """
 
         # TESTING plot locations of target sources
-        ra_plot = coord.Angle(source_list['ra']*u.degree)
+        ra_plot = coord.Angle(target_list['ra']*u.degree)
         ra_plot = ra_plot.wrap_at(180*u.degree)
-        dec_plot = coord.Angle(source_list['decl']*u.degree)
+        dec_plot = coord.Angle(target_list['decl']*u.degree)
         location_fig = plt.figure(figsize=(8,6))
         ax = location_fig.add_subplot(111, projection="mollweide")
         ax.scatter(ra_plot.radian, dec_plot.radian, marker="+")
         ax.grid(True)
 
         location_fig.savefig("test_plot.pdf")
-        subprocess.Popen('open %s' % "test_plot.pdf", shell=True)
+        #subprocess.Popen('open %s' % "test_plot.pdf", shell=True)
         pointing_coord = coord.SkyCoord(ra = c_ra*u.rad, dec = c_dec*u.rad, frame='icrs')
-        print("Plot of targets for pointing coordinates (", pointing_coord.ra.to_string(unit=u.hour, sep=':'),",", pointing_coord.dec.to_string(unit=u.degree, sep=':'), ") saved successfully.\n")
+        logger.info('Plot of targets for pointing coordinates ({}, {}) saved successfully'.format(pointing_coord.ra.to_string(unit=u.hour, sep=':'),pointing_coord.dec.to_string(unit=u.degree, sep=':')))
 
-        # TESTING print source list
-        print("Source list:\n", source_list, "\n")
-        return source_list
+        # TESTING output target list
+        print("\nTarget list for pointing coordinates (",(pointing_coord.ra.to_string(unit=u.hour, sep=':')),",",(pointing_coord.dec.to_string(unit=u.degree, sep=':')),"):\n", target_list,"\n")
+        return target_list

@@ -4,6 +4,7 @@ import json
 import yaml
 import time
 import threading
+import sys
 import numpy as np
 from datetime import datetime
 from astropy import units as u
@@ -104,8 +105,16 @@ class Listen(threading.Thread):
            messages that come through redis.
         """
 
+        #for item in self.p.listen():
+        #    self._message_to_func(item['channel'], self.channel_actions)(item['data'])
+
         for item in self.p.listen():
-            self._message_to_func(item['channel'], self.channel_actions)(item['data'])
+            try:
+                self._message_to_func(item['channel'], self.channel_actions)(item['data'])
+            except IndexError:
+                if 'target' in item['data']:
+                    arr_item_data = item['data'].split(', ')
+                    logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates'.format(arr_item_data[1], arr_item_data[2]))
 
     """
 
