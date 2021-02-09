@@ -108,13 +108,29 @@ class Listen(threading.Thread):
         #for item in self.p.listen():
         #    self._message_to_func(item['channel'], self.channel_actions)(item['data'])
 
+        #for item in self.p.listen():
+        #    try:
+        #        self._message_to_func(item['channel'], self.channel_actions)(item['data'])
+        #    except IndexError:
+        #        if 'target' in item['data']:
+        #            arr_item_data = item['data'].split(', ')
+        #            logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates\n'.format(arr_item_data[1], arr_item_data[2]))
+
         for item in self.p.listen():
             try:
                 self._message_to_func(item['channel'], self.channel_actions)(item['data'])
             except IndexError:
                 if 'target' in item['data']:
                     arr_item_data = item['data'].split(', ')
-                    logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates'.format(arr_item_data[1], arr_item_data[2]))
+                    dec_coord_dms = arr_item_data[2]
+                    dec_coord = dec_coord_dms.split(':')
+                    d = float(dec_coord[0])
+                    m = float(dec_coord[1])
+                    s = float(dec_coord[2])
+                    if (d + m/60 + s/3600) > 45:
+                        logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates\n'.format(arr_item_data[1], arr_item_data[2]))
+                    else:
+                         continue
 
     """
 

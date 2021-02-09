@@ -269,18 +269,26 @@ class Triage(Database_Handler):
 
         # TODO replace these with sqlalchemy queries
 
+        # list of previous observations
         prevObs = pd.read_sql(query, con = self.conn)
         print(prevObs,"\n")
+        prevObs.to_csv('prevObs.csv')
+
+        # sources previously observed
         priority[tb['source_id'].isin(prevObs['source_id'])] = 5
 
-        # source observed for < 5 minutes
+        # sources previously observed, but at a different frequency
+
+        # sources previously observed, but for < 5 minutes
         longestObs = prevObs.groupby('source_id')['duration'].max()
         for m in tb['source_id']:
             try:
                 longestObs[m]
                 if longestObs[m] < 300:
                     priority[tb['source_id'] == m] = 3
-            except:
+            except KeyError: # chosen source is not in prevObs table
+                continue
+            except IndexError: # prevObs table is empty
                 continue
 
         # priority[tb['table_name'].str.contains('calibrator')] = 0
@@ -357,8 +365,7 @@ class Triage(Database_Handler):
         location_fig.savefig("test_plot.pdf")
         #subprocess.Popen('open %s' % "test_plot.pdf", shell=True)
         pointing_coord = coord.SkyCoord(ra = c_ra*u.rad, dec = c_dec*u.rad, frame='icrs')
-        logger.info('Plot of targets for pointing coordinates ({}, {}) saved successfully'.format(pointing_coord.ra.to_string(unit=u.hour, sep=':'),pointing_coord.dec.to_string(unit=u.degree, sep=':')))
-
-        # TESTING output target list
-        print("\nTarget list for pointing coordinates (",(pointing_coord.ra.to_string(unit=u.hour, sep=':')),",",(pointing_coord.dec.to_string(unit=u.degree, sep=':')),"):\n", target_list,"\n")
+        logger.info('Plot of targets for pointing coordinates ({}, {}) saved successfully'.format(pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True)))
+        
+        print('\nTarget list for pointing coordinates ({}, {}):\n {}\n'.format(pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), target_list))
         return target_list
