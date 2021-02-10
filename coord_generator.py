@@ -1,4 +1,5 @@
 import time
+from datetime import datetime 
 from random import seed
 from random import randint
 from random import choice
@@ -30,7 +31,7 @@ with open('random_seed.csv') as f:
 
         a = '{}{}:{}:{}.{}, {}{}:{}:{}.{}'.format(rand_ra_pos,rand_ra_h,rand_ra_m,rand_ra_s,rand_ra_cs,rand_dec_pos,rand_dec_d,rand_dec_m,rand_dec_s,rand_dec_cs)
 
-        print(a)
+        print('[{}] {}'.format(datetime.now(),a))
 
         with open('test/messages.txt', 'r') as g:
             get_all = g.readlines()

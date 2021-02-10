@@ -255,14 +255,10 @@ class Triage(Database_Handler):
         priority = np.ones(tb.shape[0], dtype=int)
 
         query = """
-                SELECT source_id, bands, duration 
-                FROM {} AS obs
-                WHERE 
-                    (SELECT COUNT(*) 
-                            FROM {} AS obs_max
-                            WHERE obs_max.source_id = obs.source_id AND obs_max.bands = obs.bands AND obs_max.duration > obs.duration
-                    ) = 0
-                """.format(table, table)
+                SELECT source_id, bands, max(duration) AS duration
+                FROM {} 
+                GROUP BY source_id, bands
+                """.format(table)
 
         #query = 'SELECT DISTINCT source_id FROM {}'.format(table)
         logger.info('Query:\n {}'.format(query)) # TRYING TO FIGURE STUFF OUT
@@ -364,6 +360,7 @@ class Triage(Database_Handler):
 
         location_fig.savefig("test_plot.pdf")
         #subprocess.Popen('open %s' % "test_plot.pdf", shell=True)
+        plt.close()
         pointing_coord = coord.SkyCoord(ra = c_ra*u.rad, dec = c_dec*u.rad, frame='icrs')
         logger.info('Plot of targets for pointing coordinates ({}, {}) saved successfully'.format(pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True)))
         
