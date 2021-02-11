@@ -105,17 +105,6 @@ class Listen(threading.Thread):
            messages that come through redis.
         """
 
-        #for item in self.p.listen():
-        #    self._message_to_func(item['channel'], self.channel_actions)(item['data'])
-
-        #for item in self.p.listen():
-        #    try:
-        #        self._message_to_func(item['channel'], self.channel_actions)(item['data'])
-        #    except IndexError:
-        #        if 'target' in item['data']:
-        #            arr_item_data = item['data'].split(', ')
-        #            logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates\n'.format(arr_item_data[1], arr_item_data[2]))
-
         for item in self.p.listen():
             try:
                 self._message_to_func(item['channel'], self.channel_actions)(item['data'])
@@ -435,10 +424,12 @@ class Listen(threading.Thread):
         # TODO: query frequency band sensor
         bands = 'L BAND'
 
+        # antenna count
+        n_antennas = antennas.count(',')+1
+
         # TODO: ask Daniel/Dave about unique file-id
         file_id = 'filler_file_id'
-        self.engine.add_sources_to_db(targets, start, end, proxies, antennas,
-                                      file_id, bands)
+        self.engine.add_sources_to_db(targets, start, end, proxies, antennas, n_antennas, file_id, bands)
 
     def _beam_radius(self, product_id, dish_size = 13.5):
         """Returns the beam radius based on the frequency band used in the

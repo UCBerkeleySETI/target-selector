@@ -111,7 +111,7 @@ class Triage(Database_Handler):
     def __init__(self, config_file):
         super(Triage, self).__init__(config_file)
 
-    def add_sources_to_db(self, df, start_time, end_time, proxies, antennas,
+    def add_sources_to_db(self, df, start_time, end_time, proxies, antennas, n_antennas,
                           file_id, bands, mode = 0, table = 'observation_status'):
         """
         Adds a pandas DataFrame to a specified table
@@ -141,6 +141,7 @@ class Triage(Database_Handler):
         source_tb['proxies'] = proxies
         source_tb['bands'] = bands
         source_tb['antennas'] = antennas
+        source_tb['n_antennas'] = n_antennas
 
         try:
             source_tb.to_sql(table, self.conn, if_exists='append', index=False)
@@ -252,16 +253,14 @@ class Triage(Database_Handler):
                 table containing the sources to be beamformed on
         """
 
-        priority = np.ones(tb.shape[0], dtype=int)
+        # initially, all sources assigned a priority of 2
+        priority = np.full(tb.shape[0], 2, dtype=int)
 
         query = """
-                SELECT source_id, bands, max(duration) AS duration
+                SELECT source_id, antennas, n_antennas, bands, max(duration) AS duration
                 FROM {} 
-                GROUP BY source_id, bands
+                GROUP BY source_id, antennas, n_antennas, bands
                 """.format(table)
-
-        #query = 'SELECT DISTINCT source_id FROM {}'.format(table)
-        logger.info('Query:\n {}'.format(query)) # TRYING TO FIGURE STUFF OUT
 
         # TODO replace these with sqlalchemy queries
 
@@ -271,30 +270,28 @@ class Triage(Database_Handler):
         prevObs.to_csv('prevObs.csv')
 
         # sources previously observed
-        priority[tb['source_id'].isin(prevObs['source_id'])] = 5
+        priority[tb['source_id'].isin(prevObs['source_id'])] = 6
 
         # sources previously observed, but at a different frequency
 
-        # sources previously observed, but for < 5 minutes
+        # sources previously observed, but for < 5 minutes, or with < 58 antennas
         longestObs = prevObs.groupby('source_id')['duration'].max()
+        mostAntennas = prevObs.groupby('source_id')['n_antennas'].max()
+
         for m in tb['source_id']:
             try:
                 longestObs[m]
-                if longestObs[m] < 300:
-                    priority[tb['source_id'] == m] = 3
+                if (longestObs[m] < 300) or (mostAntennas[m] < 58):
+                    priority[tb['source_id'] == m] = 4
             except KeyError: # chosen source is not in prevObs table
                 continue
             except IndexError: # prevObs table is empty
                 continue
 
-        # priority[tb['table_name'].str.contains('calibrator')] = 0
-        # priority[tb['table_name'].str.contains('adhoc')] = 0
-        # priority[tb['table_name'].str.contains('exotica')] = 2
-        # priority[tb['table_name'].str.contains('part_observed')] = 3
-        # priority[tb['table_name'].str.contains('freq_observed')] = 4
+        # priority[tb['table_name'].str.contains('adhoc')] = 1
+        # priority[tb['table_name'].str.contains('exotica')] = 3
 
         tb['priority'] = priority
-
         return tb.sort_values('priority')
 
     def select_targets(self, c_ra, c_dec, beam_rad, table = 'target_list', cols = ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']):

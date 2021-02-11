@@ -38,6 +38,7 @@ class Observation(Base):
     rowid = Column(INT, primary_key = True)
     source_id = Column(BIGINT)
     antennas = Column(Text)
+    n_antennas = Column(INT)
     proxies = Column(Text)
     bands = Column(VARCHAR(45))
     duration = Column(FLOAT)

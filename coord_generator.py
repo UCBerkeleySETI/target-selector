@@ -10,7 +10,6 @@ with open('random_seed.csv') as f:
         seed(n)
 
         # generate integers for coordinates
-
         if choice([True, False]) == True:
             rand_ra_pos = '-'
         else:
@@ -44,4 +43,4 @@ with open('random_seed.csv') as f:
 
         exec(open("./redis_testing.py").read())
 
-        time.sleep(5)
+        time.sleep(1.5)
