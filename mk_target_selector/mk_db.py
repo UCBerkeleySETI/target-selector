@@ -222,15 +222,14 @@ class Triage(Database_Handler):
         bounds = np.rad2deg([ra_min, ra_max, dec_min, dec_max])
 
         query = """
-                #(SELECT {cols}
-                # FROM calibrator_list
-                # LIMIT 1
-                #) UNION
                 SELECT {cols}
                 FROM {table}
-                # UNION 
-                # SELECT {cols}
-                # FROM adhoc_sources
+                UNION ALL
+                SELECT {cols}
+                FROM adhoc_list
+                UNION ALL
+                SELECT {cols}
+                FROM exotica_list
                 WHERE ({ra_min} < ra  AND ra < {ra_max}) AND
                       ({dec_min} < decl AND decl < {dec_max})
                 """.format(cols = ', '.join(cols), table = table,
@@ -269,6 +268,9 @@ class Triage(Database_Handler):
         print(prevObs,"\n")
         prevObs.to_csv('prevObs.csv')
 
+        # exotica sources
+        priority[tb['table_name'].str.contains('exotica')] = 3
+
         # sources previously observed
         priority[tb['source_id'].isin(prevObs['source_id'])] = 6
 
@@ -288,8 +290,8 @@ class Triage(Database_Handler):
             except IndexError: # prevObs table is empty
                 continue
 
-        # priority[tb['table_name'].str.contains('adhoc')] = 1
-        # priority[tb['table_name'].str.contains('exotica')] = 3
+        # ad-hoc sources
+        priority[tb['table_name'].str.contains('adhoc')] = 1
 
         tb['priority'] = priority
         return tb.sort_values('priority')

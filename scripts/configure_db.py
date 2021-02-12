@@ -10,6 +10,7 @@ for bulk inserting data from csv file in the future.
 import os
 import yaml
 import pandas as pd
+import numpy as np
 from getpass import getpass
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
@@ -23,11 +24,14 @@ from argparse import (
     ArgumentDefaultsHelpFormatter
 )
 
-# link to 26m star database
+# link to 26m star table
 data_link = 'https://www.dropbox.com/s/hxk6pxqdw1gyp3h/1_million_sample_complete.csv?dl=1'
 
-# link to calibrator database 
-# data_link_cal = 'https://www.dropbox.com/s/txrp6hak5qgmz50/atca_calibrator_database_v3.csv?dl=1'
+# link to ad-hoc table 
+data_link_adhoc = 'https://www.dropbox.com/s/1o9cagoxuqzaqrs/adhoc.csv?dl=1'
+
+# link to exotica table 
+data_link_ex = 'https://www.dropbox.com/s/idv3gae73p6ba87/exotica.csv?dl=1'
 
 Base = declarative_base()
 class Observation(Base):
@@ -36,7 +40,7 @@ class Observation(Base):
     """
     __tablename__ = 'observation_status'
     rowid = Column(INT, primary_key = True)
-    source_id = Column(BIGINT)
+    source_id = Column(VARCHAR(45))
     antennas = Column(Text)
     n_antennas = Column(INT)
     proxies = Column(Text)
@@ -93,8 +97,9 @@ def main(user, password, host, schema_name):
             'drivername': 'mysql'}
 
     source_table_name = 'target_list'
-    #cal_table_name = 'calibrator_list'
     obs_table_name = 'observation_status'
+    adhoc_table_name = 'adhoc_list'
+    exotica_table_name = 'exotica_list'
     url = URL.create(**cred)
     engine = create_engine(url)
     engine.execute('CREATE DATABASE IF NOT EXISTS {};'.format(schema_name))
@@ -104,18 +109,7 @@ def main(user, password, host, schema_name):
     cred['database'] = schema_name
     write_yaml(cred)
 
-    #if not engine.dialect.has_table(engine, cal_table_name):
-    #    print ('Creating table: {}'.format(cal_table_name))
-    #    tb = pd.read_csv(data_link_cal)
-    #    tb.to_sql(cal_table_name, engine, index = False,
-    #              if_exists = 'replace', chunksize = None)
-    #    engine.execute('CREATE INDEX target_list_loc_idx ON \
-    #                    {}.{} (ra, decl)'.format(schema_name, cal_table_name))
-    #    del tb
-
-    #else:
-    #    print ('Table with the name, {}, already exists. Could not create table.'.format(cal_table_name))
-
+    # Create observation status table
     if not engine.dialect.has_table(engine, obs_table_name):
         print ('Creating table: {}'.format(obs_table_name))
         Base.metadata.create_all(engine)
@@ -123,11 +117,42 @@ def main(user, password, host, schema_name):
         engine.execute('DROP TABLE {}.{}'.format(schema_name, obs_table_name))
         Base.metadata.create_all(engine)
 
+    # Create adhoc sources table
+    if not engine.dialect.has_table(engine, adhoc_table_name):
+        print ('Creating table: {}'.format(adhoc_table_name))
+        tb = pd.read_csv(data_link_adhoc)
+        tb['project'] = np.nan
+        tb['dist_c'] = np.nan
+        tb.to_sql(adhoc_table_name, engine, index = False,
+                  if_exists = 'replace', chunksize = None, dtype={'source_id': VARCHAR(45)})
+        engine.execute('CREATE INDEX target_list_loc_idx ON \
+                        {}.{} (ra, decl)'.format(schema_name, adhoc_table_name))
+        del tb
+
+    else:
+        print ('Table with the name, {}, already exists. Could not create table.'.format(adhoc_table_name))
+
+    # Create exotica sources table
+    if not engine.dialect.has_table(engine, exotica_table_name):
+        print ('Creating table: {}'.format(exotica_table_name))
+        tb = pd.read_csv(data_link_ex)
+        tb['project'] = np.nan
+        tb['dist_c'] = np.nan
+        tb.to_sql(exotica_table_name, engine, index = False,
+                  if_exists = 'replace', chunksize = None, dtype={'source_id': VARCHAR(45)})
+        engine.execute('CREATE INDEX target_list_loc_idx ON \
+                        {}.{} (ra, decl)'.format(schema_name, exotica_table_name))
+        del tb
+
+    else:
+        print ('Table with the name, {}, already exists. Could not create table.'.format(exotica_table_name))
+
+    # Create 26m targets table
     if not engine.dialect.has_table(engine, source_table_name):
         print ('Creating table: {}'.format(source_table_name))
         tb = pd.read_csv(data_link)
         tb.to_sql(source_table_name, engine, index = False,
-                  if_exists = 'replace', chunksize = None)
+                  if_exists = 'replace', chunksize = None, dtype={'source_id': VARCHAR(45)})
         engine.execute('CREATE INDEX target_list_loc_idx ON \
                         {}.{} (ra, decl)'.format(schema_name, source_table_name))
         del tb
