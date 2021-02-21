@@ -51,8 +51,6 @@ with open('random_seed.csv') as f:
 
         a = '{}{}:{}:{}.{}, {}{}:{}:{}.{}'.format(rand_ra_pos,rand_ra_h,rand_ra_m,rand_ra_s,rand_ra_cs,rand_dec_pos,rand_dec_d,rand_dec_m,rand_dec_s,rand_dec_cs)
 
-        print('[{}] {}'.format(datetime.now(),a))
-
         # set one of a number of frequency values
         if choice([True, False]) == True:
             rand_freq = '-'
@@ -67,6 +65,8 @@ with open('random_seed.csv') as f:
             b = 800000000
         else:
             b = 900000000
+
+        print('[{}] {} MHz ({})'.format(datetime.now(),(b/1e6),a))
 
         pool_resources = 'bluse_1,cbf_1,fbfuse_1,m000,m001'
 
