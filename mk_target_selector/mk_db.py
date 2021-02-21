@@ -1,6 +1,7 @@
 import os
 import yaml
 import subprocess
+import math
 import numpy as np
 import pandas as pd
 import matplotlib #for location plot
@@ -15,9 +16,11 @@ from sqlalchemy.engine.url import URL
 
 try:
     from .logger import log as logger
+    from .redis_tools import get_redis_key
 
 except ImportError:
     from logger import log as logger
+    from redis_tools import get_redis_key
 
 class Database_Handler(object):
     """
@@ -180,7 +183,7 @@ class Triage(Database_Handler):
                             success = success)
         self.conn.execute(update)
 
-    def _box_filter(self, c_ra, c_dec, beam_rad, table, cols):
+    def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq):
         """Returns a string which acts as a pre-filter for the more computationally
         intensive search
 
@@ -202,6 +205,9 @@ class Triage(Database_Handler):
                 SQL query string
 
         """
+        beam_rad_arcmin = beam_rad * (180 / math.pi) * 60
+        print("\nBeam radius at {} Hz: {} radians = {} arc minutes\n".format(current_freq,beam_rad,beam_rad_arcmin))
+        #print("Beam radius:",beam_rad,"radians\n")
         if c_dec - beam_rad <= - np.pi / 2.0:
             ra_min, ra_max = 0.0, 2.0 * np.pi
             dec_min = -np.pi / 2.0
@@ -237,7 +243,7 @@ class Triage(Database_Handler):
                            dec_min = bounds[2], dec_max = bounds[3])
         return query
 
-    def triage(self, tb, table = 'observation_status'):
+    def triage(self, tb, current_freq, table = 'observation_status'):
         """
         Returns an array of priority values (or maybe the table with priority values
         appended)
@@ -265,7 +271,8 @@ class Triage(Database_Handler):
 
         # list of previous observations
         prevObs = pd.read_sql(query, con = self.conn)
-        print(prevObs,"\n")
+        print(prevObs.drop('antennas', axis=1),"\n")
+        #print(prevObs,"\n")
         prevObs.to_csv('prevObs.csv')
 
         # exotica sources
@@ -275,6 +282,18 @@ class Triage(Database_Handler):
         priority[tb['source_id'].isin(prevObs['source_id'])] = 6
 
         # sources previously observed, but at a different frequency
+        prevFreq = prevObs.drop('antennas', axis=1).groupby('source_id').agg(lambda x: ', '.join(x.values))
+
+        for p in tb['source_id']:
+            try:
+                if current_freq in prevFreq.loc[p]['bands']:
+                    continue
+                else:
+                    priority[tb['source_id'] == p] = 5
+            except KeyError: # chosen source is not in prevFreq table
+                continue
+            except IndexError: # prevFreq table is empty
+                continue
 
         # sources previously observed, but for < 5 minutes, or with < 58 antennas
         longestObs = prevObs.groupby('source_id')['duration'].max()
@@ -282,7 +301,6 @@ class Triage(Database_Handler):
 
         for m in tb['source_id']:
             try:
-                longestObs[m]
                 if (longestObs[m] < 300) or (mostAntennas[m] < 58):
                     priority[tb['source_id'] == m] = 4
             except KeyError: # chosen source is not in prevObs table
@@ -296,7 +314,7 @@ class Triage(Database_Handler):
         tb['priority'] = priority
         return tb.sort_values('priority')
 
-    def select_targets(self, c_ra, c_dec, beam_rad, table = 'target_list', cols = ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']):
+    def select_targets(self, c_ra, c_dec, beam_rad, current_freq = 'Unknown', table = 'target_list', cols = None):
         """Returns a string to query the 1 million star database to find sources
            within some primary beam area
 
@@ -308,6 +326,7 @@ class Triage(Database_Handler):
                 Pointing coordinates of the telescope in radians
             beam_rad: float
                 Angular radius of the primary beam in radians
+            current_freq: ......
             table : str
                 Name of the table that is being queried
 
@@ -317,7 +336,11 @@ class Triage(Database_Handler):
                 criteria
 
         """
-        mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols)
+
+        if not cols:
+            cols =  ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']
+
+        mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols, current_freq)
 
         query = """
                 SELECT *
@@ -330,12 +353,12 @@ class Triage(Database_Handler):
 
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con = self.conn)
-        sorting_priority = self.triage(tb)
+        sorting_priority = self.triage(tb, current_freq)
         target_list = sorting_priority.sort_values(by=['priority', 'dist_c'])
-        self.output_targets(target_list, c_ra, c_dec)
+        self.output_targets(target_list, c_ra, c_dec, current_freq)
         return target_list
 
-    def output_targets(self, target_list, c_ra, c_dec):
+    def output_targets(self, target_list, c_ra, c_dec, current_freq = 'Unknown'):
         """Function to plot selected targets & output the source list
 
         Parameters:
@@ -344,6 +367,8 @@ class Triage(Database_Handler):
                 criteria
             c_ra, c_dec : float
                 Pointing coordinates of the telescope in radians
+            current_freq:...
+                ...
         Returns:
             None
         """
@@ -361,7 +386,8 @@ class Triage(Database_Handler):
         #subprocess.Popen('open %s' % "test_plot.pdf", shell=True)
         plt.close()
         pointing_coord = coord.SkyCoord(ra = c_ra*u.rad, dec = c_dec*u.rad, frame='icrs')
-        logger.info('Plot of targets for pointing coordinates ({}, {}) saved successfully'.format(pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True)))
+
+        logger.info('Plot of targets for pointing coordinates ({}, {}) at {} Hz saved successfully'.format(pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), current_freq))
         
         print('\nTarget list for pointing coordinates ({}, {}):\n {}\n'.format(pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), target_list))
         return target_list

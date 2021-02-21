@@ -16,6 +16,7 @@ bluse:///set
 alerts
 sensor_alerts
 sensor_alerts
+sensor_alerts
 alerts
 bluse:///set
 sensor_alerts

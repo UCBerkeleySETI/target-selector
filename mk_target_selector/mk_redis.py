@@ -96,7 +96,8 @@ class Listen(threading.Thread):
             'schedule_blocks': self._pass,
             'pool_resources': self._pool_resources,
             'observation_status': self._status_update,
-            'target': self._target_query
+            'target': self._target_query,
+            'frequency': self._frequency
         }
 
     def run(self):
@@ -119,6 +120,7 @@ class Listen(threading.Thread):
                     if (d + m/60 + s/3600) > 45:
                         logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates\n'.format(arr_item_data[1], arr_item_data[2]))
                     else:
+                         print(Exception)
                          continue
 
     """
@@ -157,8 +159,9 @@ class Listen(threading.Thread):
                 product_id for this particular subarray
 
         """
-        self.sensor_info[product_id] = {'data_suspect': True, 'pointings': 0,
-                                        'targets': [], 'pool_resources': ''}
+        if product_id not in self.sensor_info:
+            self.sensor_info[product_id] = {'data_suspect': True, 'pointings': 0,
+                                            'targets': [], 'pool_resources': '', 'frequency': ''}
 
     def _deconfigure(self, product_id):
         """Response to deconfigure message from the redis alerts channel
@@ -207,6 +210,9 @@ class Listen(threading.Thread):
         if sensor.endswith('pool_resources'):
             sensor = 'pool_resources'
 
+        if sensor.endswith('frequency'):
+            sensor = 'frequency'
+
         if product_id not in self.sensor_info.keys():
             self._configure(product_id)
 
@@ -234,8 +240,10 @@ class Listen(threading.Thread):
             coords = SkyCoord(' '.join(value.split(', ')[-2:]), unit=(u.hourangle, u.deg))
             p_num = self.sensor_info[product_id]['pointings']
             self.sensor_info[product_id][sensor] = coords
+            #beam_rad2 = self._beam_radius(product_id)
+            #print(beam_rad2)
             targets = self.engine.select_targets(coords.ra.rad, coords.dec.rad,
-                                                 beam_rad = np.deg2rad(0.5))
+                                                 beam_rad=self._beam_radius(product_id),                                                 current_freq=self.sensor_info[product_id].get('frequency', 'unknown'))
             self.sensor_info[product_id]['pointings'] += 1
             self.sensor_info[product_id]['targets'].append(targets)
             self._publish_targets(targets, product_id = product_id,
@@ -268,7 +276,8 @@ class Listen(threading.Thread):
         start = time.time()
         for i, t in enumerate(target_pointing):
             targets = self.engine.select_targets(*self.pointing_coords(t),
-                                                  beam_rad = np.deg2rad(0.5))
+            beam_rad,
+            current_freq=self.sensor_info[product_id].get('frequency', 'unknown'))
             self.sensor_info[product_id]['pointing_{}'.format(i)] = targets
             self._publish_targets(targets, product_id = product_id, sub_arr_id = i)
 
@@ -309,6 +318,26 @@ class Listen(threading.Thread):
         value = get_redis_key(self.redis_server, message)
         self.sensor_info[product_id]['pool_resources'] = value
 
+
+    def _frequency(self, message):
+        """Response to a frequency message from the sensor_alerts channel.
+
+        Parameters:
+            message: (str)
+                Message passed over sensor_alerts channels. Acts as the key to
+                query Redis in the case of this function.
+
+        Returns:
+            currentFreq:.....
+                Current frequency of observation
+        """
+
+        product_id, sensor_name = message.split(':')
+        value = get_redis_key(self.redis_server, message)
+        self.sensor_info[product_id]['frequency'] = value
+        current_freq = value
+        #logger.info(f"Frequency of observation set to: {current_freq}")
+        return current_freq
     """
 
     Internal Methods
@@ -422,7 +451,8 @@ class Listen(threading.Thread):
         targets = self.sensor_info[product_id]['targets'][0]
 
         # TODO: query frequency band sensor
-        bands = 'L BAND'
+        bands = self.sensor_info[product_id]['frequency']
+        #bands = 'L BAND'
 
         # antenna count
         n_antennas = antennas.count(',')+1
@@ -445,10 +475,9 @@ class Listen(threading.Thread):
         """
 
         # TODO: change this to the real name
-        sensor_name = 'max_freq'
-        key = '{}:{}'.format(product_id, sensor_name)
-        max_freq = get_redis_key(self.redis_server, key)
-        return (2.998e8 / max_freq) / dish_size
+        current_freq = float(self.sensor_info[product_id]['frequency'])
+        beam_rad = (2.998e8 / current_freq) / dish_size
+        return beam_rad
 
     def _publish_targets(self, targets, product_id, sub_arr_id = 0, sensor_name = 'targets',
                          columns = ['ra', 'decl', 'priority'] , channel = 'bluse:///set'):

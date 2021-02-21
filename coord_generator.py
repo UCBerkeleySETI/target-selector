@@ -1,8 +1,29 @@
 import time
+import json
+import redis
+import numpy as np
+import yaml
+import re
 from datetime import datetime 
 from random import seed
 from random import randint
 from random import choice
+
+with open('/Users/Bart/meerkat_target_selector/test/channels.txt', 'r') as f:
+    channel = f.read()
+    
+with open('/Users/Bart/meerkat_target_selector/test/messages.txt', 'r') as f:
+    messages = f.read()
+
+chnls = channel.split('\n')
+msgs = messages.split('\n')
+
+def publish_key(chan, key, val):
+    r.set(key, val)
+    r.publish(chan, key)
+    return True
+
+r = redis.StrictRedis()
 
 with open('random_seed.csv') as f:
     for n in f:
@@ -32,15 +53,43 @@ with open('random_seed.csv') as f:
 
         print('[{}] {}'.format(datetime.now(),a))
 
-        with open('test/messages.txt', 'r') as g:
-            get_all = g.readlines()
-        with open('test/messages.txt', 'w') as h:
-            for i, line in enumerate(get_all,1):
-                if i == 17:    
-                    h.writelines('array_1:target:radec, {}\n'.format(a))
-                else:    
-                    h.writelines(line)
+        # set one of a number of frequency values
+        if choice([True, False]) == True:
+            rand_freq = '-'
+        else:
+            rand_freq = ''
+        rand_freq_ind = randint(1,3)
+        if rand_freq_ind == 1:
+            b = 600000000
+        elif rand_freq_ind == 2:
+            b = 700000000
+        elif rand_freq_ind == 3:
+            b = 800000000
+        else:
+            b = 900000000
 
-        exec(open("./redis_testing.py").read())
+        pool_resources = 'bluse_1,cbf_1,fbfuse_1,m000,m001'
 
-        time.sleep(1.5)
+        publish_key('sensor_alerts', 'array_1:subarray_1_pool_resources', pool_resources)
+
+        publish_key('sensor_alerts', 'array_1:subarray_1_streams_wide_antenna_channelised_voltage_centre_frequency', b)
+
+        coords = 'array_1:target:radec, {}'.format(a)
+
+        final_messages = []
+        for d, line in enumerate(msgs):
+            if d <= 15:
+                final_messages.append(line)
+            elif d == 16:
+                final_messages.append(coords)
+            elif d >= 17:
+                final_messages.append(line)
+
+        for i in range(len(final_messages)-1):
+            if final_messages[i].startswith('m0'):
+                continue
+            #print(chnls[i], final_messages[i])
+            r.publish(chnls[i], final_messages[i])
+            time.sleep(0.05)
+
+        time.sleep(5)
