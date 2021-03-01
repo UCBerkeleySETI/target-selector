@@ -1,18 +1,17 @@
-import os
+import matplotlib.pyplot as plt  # for location plot
+import astropy.coordinates as coord  # for location plot
+import astropy.units as u  # for location plot
+from dateutil import parser
+# from datetime import datetime
+from sqlalchemy import create_engine
+from sqlalchemy.engine.url import URL
 import yaml
-import subprocess
 import math
 import numpy as np
 import pandas as pd
-import matplotlib #for location plot
-matplotlib.use('Agg') #for location plot
-import matplotlib.pyplot as plt #for location plot
-import astropy.coordinates as coord #for location plot
-import astropy.units as u #for location plot
-from dateutil import parser
-from datetime import datetime
-from sqlalchemy import create_engine
-from sqlalchemy.engine.url import URL
+import matplotlib  # for location plot
+
+matplotlib.use('Agg')  # for location plot
 
 try:
     from .logger import log as logger
@@ -22,19 +21,20 @@ except ImportError:
     from logger import log as logger
     from redis_tools import get_redis_key
 
-class Database_Handler(object):
+
+class DatabaseHandler(object):
     """
     Class to handle the connection to the source database as well as querying
     the database for astronomical sources within the field of view.
 
     Examples:
-        >>> db = Database_Handler()
-        >>> db.select_targets(c_ra, c_dec, beam_rad)
+        # db = DatabaseHandler()
+        # db.select_targets(c_ra, c_dec, beam_rad)
     """
 
     def __init__(self, config_file):
         """
-        __init__ function for the DataBase_Handler class
+        __init__ function for the DatabaseHandler class
 
         Parameters:
             config_file: (str)
@@ -44,7 +44,7 @@ class Database_Handler(object):
             None
         """
         self.cfg = self.configure_settings(config_file)
-        #self.priority_sources = np.array(self.cfg['priority_sources'])
+        # self.priority_sources = np.array(self.cfg['priority_sources'])
         self.conn = self.connect_to_db(self.cfg['mysql'])
 
     def configure_settings(self, config_file):
@@ -82,7 +82,7 @@ class Database_Handler(object):
                 triaging
         """
         url = URL(**cred)
-        #self.engine = create_engine(name_or_url = url)
+        # self.engine = create_engine(name_or_url = url)
         self.engine = create_engine(url)
         return self.engine.connect()
 
@@ -98,24 +98,26 @@ class Database_Handler(object):
         self.conn.close()
         self.engine.dispose()
 
-class Triage(Database_Handler):
+
+class Triage(DatabaseHandler):
     """
 
     ADD IN DOCUMENTATION
 
     Examples:
-        >>> conn = Triage()
-        >>> conn.select_targets(ra, dec, beam_rad)
+        # conn = Triage()
+        # conn.select_targets(ra, dec, beam_rad)
 
     When start() is called, a loop is started that subscribes to the "alerts" and
     "sensor_alerts" channels on the Redis server. Depending on the which message
     that passes over which channel, various processes are run:
     """
+
     def __init__(self, config_file):
         super(Triage, self).__init__(config_file)
 
     def add_sources_to_db(self, df, start_time, end_time, proxies, antennas, n_antennas,
-                          file_id, bands, mode = 0, table = 'observation_status'):
+                          file_id, bands, mode=0, table='observation_status'):
         """
         Adds a pandas DataFrame to a specified table
 
@@ -123,10 +125,22 @@ class Triage(Database_Handler):
             df: (pandas.DataFrame)
                 DataFrame containing information on the sources within the field
                 of views
-            t: (dict)
-                Dictionary containing observation metadata
             start_time: (datetime)
-                Datetime object of the observation
+                Datetime start time object of the observation
+            end_time: (datetime)
+                Datetime end time object of the observation
+            proxies: (...)
+                ...
+            antennas: (...)
+                ...
+            n_antennas: (...)
+                ...
+            file_id: (...)
+                ...
+            bands: (...)
+                ...
+            mode: (...)
+                ...
             table:
                 name of the observation metadata table
 
@@ -151,24 +165,26 @@ class Triage(Database_Handler):
             return True
 
         except Exception as e:
-            print (e)
+            print(e)
             logger.warning('Was not able to add sources to the database!')
             return False
 
     def update_obs_status(self, source_id, obs_start_time,
-                          success, table = 'observation_status'):
+                          success, table='observation_status'):
         """
         Function to update the status of the observation. For now, it only updates
         the success column, but should be flexible enough to update things like
         length of observation time, observation start time, etc.
 
         Parameters:
-            id: (str, int)
+            source_id: (str)
                 ID of the source being accessed
-            time: (datetime)
-                Time of observation
+            obs_start_time: (datetime)
+                Start time of observation
             success: (bool)
                 Status of the observation that is to be updated
+            table: (...)
+                Table to be updated
 
         Returns:
             None
@@ -178,9 +194,9 @@ class Triage(Database_Handler):
                     UPDATE {table}
                     SET success = {success}
                     WHERE (source_id = {id} AND obs_start_time = '{time}');
-                 """.format(table = table, id = source_id,
-                            time = parser.parse(obs_start_time),
-                            success = success)
+                 """.format(table=table, id=source_id,
+                            time=parser.parse(obs_start_time),
+                            success=success)
         self.conn.execute(update)
 
     def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq):
@@ -200,14 +216,18 @@ class Triage(Database_Handler):
                 Table within database where
             cols: (list)
                 Columns to select within the table
+            current_freq:.....
+                Current central frequency of observation
+            current_band:.....
+                Current frequency band of observation
         Returns:
             query: str
                 SQL query string
 
         """
+        current_band = self._freqBand(current_freq)
         beam_rad_arcmin = beam_rad * (180 / math.pi) * 60
-        print("\nBeam radius at {} Hz: {} radians = {} arc minutes\n".format(current_freq,beam_rad,beam_rad_arcmin))
-        #print("Beam radius:",beam_rad,"radians\n")
+        print("\nBeam radius at {} Hz ({}): {} radians = {} arc minutes\n".format(current_freq, current_band, beam_rad, beam_rad_arcmin))
         if c_dec - beam_rad <= - np.pi / 2.0:
             ra_min, ra_max = 0.0, 2.0 * np.pi
             dec_min = -np.pi / 2.0
@@ -219,9 +239,9 @@ class Triage(Database_Handler):
             dec_max = np.pi / 2.0
 
         else:
-            ra_offset = np.arcsin( np.sin(beam_rad) / np.cos(c_dec))
-            ra_min  = c_ra - ra_offset
-            ra_max  = c_ra + ra_offset
+            ra_offset = np.arcsin(np.sin(beam_rad) / np.cos(c_dec))
+            ra_min = c_ra - ra_offset
+            ra_max = c_ra + ra_offset
             dec_min = c_dec - beam_rad
             dec_max = c_dec + beam_rad
 
@@ -238,12 +258,38 @@ class Triage(Database_Handler):
                 FROM exotica_list
                 WHERE ({ra_min} < ra  AND ra < {ra_max}) AND
                       ({dec_min} < decl AND decl < {dec_max})
-                """.format(cols = ', '.join(cols), table = table,
-                           ra_min = bounds[0], ra_max = bounds[1],
-                           dec_min = bounds[2], dec_max = bounds[3])
+                """.format(cols=', '.join(cols), table=table,
+                           ra_min=bounds[0], ra_max=bounds[1],
+                           dec_min=bounds[2], dec_max=bounds[3])
         return query
 
-    def triage(self, tb, current_freq, table = 'observation_status'):
+    def _freqBand(self, current_freq):
+        """
+        Calculates the current frequency band of observation
+
+        Parameters:
+            current_freq: (...)
+                ...
+        Returns:
+            current_band: (...)
+                ...
+
+        """
+
+        if (float(current_freq) > 300000000) and (float(current_freq) < 1000000000):
+            current_band = "UHF band"
+        elif (float(current_freq) > 1000000000) and (float(current_freq) < 2000000000):
+            current_band = "L band"
+        elif (float(current_freq) > 2000000000) and (float(current_freq) < 4000000000):
+            current_band = "S band"
+        elif (float(current_freq) > 8000000000) and (float(current_freq) < 12000000000):
+            current_band = "X band"
+        else:
+            current_band = "FAIL"
+
+        return current_band
+
+    def triage(self, tb, current_freq, table='observation_status'):
         """
         Returns an array of priority values (or maybe the table with priority values
         appended)
@@ -252,6 +298,10 @@ class Triage(Database_Handler):
             tb: (pandas.DataFrame)
                 table containing sources within the field of view of MeerKAT's
                 pointing
+            current_freq: (...)
+                Current frequency of observation
+            table: (...)
+                Table of previous observations to use for triaging
 
         Returns:
             tb: (pandas.DataFrame)
@@ -270,43 +320,40 @@ class Triage(Database_Handler):
         # TODO replace these with sqlalchemy queries
 
         # list of previous observations
-        prevObs = pd.read_sql(query, con = self.conn)
-        print(prevObs.drop('antennas', axis=1),"\n")
-        #print(prevObs,"\n")
-        prevObs.to_csv('prevObs.csv')
+        prev_obs = pd.read_sql(query, con=self.conn)
+        print(prev_obs.drop('antennas', axis=1), "\n")
+        prev_obs.to_csv('prev_obs.csv')
 
         # exotica sources
         priority[tb['table_name'].str.contains('exotica')] = 3
 
         # sources previously observed
-        priority[tb['source_id'].isin(prevObs['source_id'])] = 6
+        priority[tb['source_id'].isin(prev_obs['source_id'])] = 6
 
         # sources previously observed, but at a different frequency
-        prevFreq = prevObs.drop('antennas', axis=1).groupby('source_id').agg(lambda x: ', '.join(x.values))
+        prev_freq = prev_obs.drop('antennas', axis=1).groupby('source_id').agg(lambda x: ', '.join(x.values))
+        longest_obs = prev_obs.groupby('source_id')['duration'].max()
+        most_antennas = prev_obs.groupby('source_id')['n_antennas'].max()
+        current_band = self._freqBand(current_freq)
 
         for p in tb['source_id']:
             try:
-                if current_freq in prevFreq.loc[p]['bands']:
-                    continue
+                if current_band in prev_freq.loc[p]['bands']:
+                    pass
                 else:
                     priority[tb['source_id'] == p] = 5
-            except KeyError: # chosen source is not in prevFreq table
-                continue
-            except IndexError: # prevFreq table is empty
-                continue
-
-        # sources previously observed, but for < 5 minutes, or with < 58 antennas
-        longestObs = prevObs.groupby('source_id')['duration'].max()
-        mostAntennas = prevObs.groupby('source_id')['n_antennas'].max()
-
-        for m in tb['source_id']:
+            except KeyError:  # chosen source is not in prev_freq table
+                pass
+            except IndexError:  # prev_freq table is empty
+                pass
+            # sources previously observed, but for < 5 minutes, or with < 58 antennas
             try:
-                if (longestObs[m] < 300) or (mostAntennas[m] < 58):
-                    priority[tb['source_id'] == m] = 4
-            except KeyError: # chosen source is not in prevObs table
-                continue
-            except IndexError: # prevObs table is empty
-                continue
+                if (longest_obs[p] < 300) or (most_antennas[p] < 58):
+                    priority[tb['source_id'] == p] = 4
+            except KeyError:  # chosen source is not in prev_obs table
+                pass
+            except IndexError:  # prev_obs table is empty
+                pass
 
         # ad-hoc sources
         priority[tb['table_name'].str.contains('adhoc')] = 1
@@ -314,21 +361,25 @@ class Triage(Database_Handler):
         tb['priority'] = priority
         return tb.sort_values('priority')
 
-    def select_targets(self, c_ra, c_dec, beam_rad, current_freq = 'Unknown', table = 'target_list', cols = None):
+    def select_targets(self, c_ra, c_dec, beam_rad, current_freq='Unknown', current_band='Unknown', table='target_list', cols=None):
         """Returns a string to query the 1 million star database to find sources
            within some primary beam area
 
         Parameters:
-
-            conn: SQLalchemy connection
-                SQLalchemy connection to a database
-            c_ra, c_dec : float
-                Pointing coordinates of the telescope in radians
+            c_ra : float
+                Pointing coordinates of the telescope in radians (right ascension)
+            c_dec : float
+                Pointing coordinates of the telescope in radians (declination)
             beam_rad: float
                 Angular radius of the primary beam in radians
             current_freq: ......
+                Current frequency of observation
+            current_band: ......
+                Current frequency band of observation
             table : str
                 Name of the table that is being queried
+            cols: ......
+                Columns of table
 
         Returns:
             target_list : DataFrame
@@ -338,7 +389,7 @@ class Triage(Database_Handler):
         """
 
         if not cols:
-            cols =  ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']
+            cols = ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']
 
         mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols, current_freq)
 
@@ -347,47 +398,58 @@ class Triage(Database_Handler):
                 FROM ({mask}) as T
                 WHERE ACOS( SIN(RADIANS(decl)) * SIN({c_dec}) + COS(RADIANS(decl)) *
                 COS({c_dec}) * COS({c_ra} - RADIANS(ra))) < {beam_rad}; \
-                """.format(mask = mask, c_ra = c_ra,
-                           c_dec = c_dec, beam_rad = beam_rad)
+                """.format(mask=mask, c_ra=c_ra,
+                           c_dec=c_dec, beam_rad=beam_rad)
         logger.info('Query:\n {}\n'.format(query))
 
         # TODO: replace with sqlalchemy queries
-        tb = pd.read_sql(query, con = self.conn)
+        tb = pd.read_sql(query, con=self.conn)
         sorting_priority = self.triage(tb, current_freq)
-        target_list = sorting_priority.sort_values(by=['priority', 'dist_c'])
+        target_list = sorting_priority.sort_values(by=['priority', 'dist_c']).reset_index().iloc[:64]
         self.output_targets(target_list, c_ra, c_dec, current_freq)
         return target_list
 
-    def output_targets(self, target_list, c_ra, c_dec, current_freq = 'Unknown'):
+    def output_targets(self, target_list, c_ra, c_dec, current_freq='Unknown'):
         """Function to plot selected targets & output the source list
 
         Parameters:
             target_list : DataFrame
                 A pandas DataFrame containing the objects meeting the filter
                 criteria
-            c_ra, c_dec : float
-                Pointing coordinates of the telescope in radians
-            current_freq:...
-                ...
+            c_ra : float
+                Pointing coordinates of the telescope in radians (right ascension)
+            c_dec : float
+                Pointing coordinates of the telescope in radians (declination)
+            current_freq:.....
+                Current central frequency of observation
+            current_band:.....
+                Current frequency band of observation
         Returns:
             None
         """
 
+        current_band = self._freqBand(current_freq)
+
         # TESTING plot locations of target sources
-        ra_plot = coord.Angle(target_list['ra']*u.degree)
-        ra_plot = ra_plot.wrap_at(180*u.degree)
-        dec_plot = coord.Angle(target_list['decl']*u.degree)
-        location_fig = plt.figure(figsize=(8,6))
+        ra_plot = coord.Angle(target_list['ra'] * u.degree)
+        ra_plot = ra_plot.wrap_at(180 * u.degree)
+        dec_plot = coord.Angle(target_list['decl'] * u.degree)
+        location_fig = plt.figure(figsize=(8, 6))
         ax = location_fig.add_subplot(111, projection="mollweide")
         ax.scatter(ra_plot.radian, dec_plot.radian, marker="+")
         ax.grid(True)
 
         location_fig.savefig("test_plot.pdf")
-        #subprocess.Popen('open %s' % "test_plot.pdf", shell=True)
         plt.close()
-        pointing_coord = coord.SkyCoord(ra = c_ra*u.rad, dec = c_dec*u.rad, frame='icrs')
+        pointing_coord = coord.SkyCoord(ra=c_ra * u.rad, dec=c_dec * u.rad, frame='icrs')
 
-        logger.info('Plot of targets for pointing coordinates ({}, {}) at {} Hz saved successfully'.format(pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), current_freq))
-        
-        print('\nTarget list for pointing coordinates ({}, {}):\n {}\n'.format(pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), target_list))
+        logger.info('Plot of targets for pointing coordinates ({}, {}) at {} Hz ({}) saved successfully'.format(
+            pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
+            pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), current_freq, current_band))
+
+        print('\nTarget list for pointing coordinates ({}, {}) at {} Hz ({}):\n {}\n'.format(
+            pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
+            pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), current_freq, current_band, target_list))
+        print("64th source_id in target list:\n{}\n".format(target_list.iloc[63]))
+        print("Last source_id in target list: {} \n".format(target_list.iloc[len(target_list)-1]['source_id']))
         return target_list

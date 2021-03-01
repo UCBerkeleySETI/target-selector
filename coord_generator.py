@@ -56,17 +56,20 @@ with open('random_seed.csv') as f:
             rand_freq = '-'
         else:
             rand_freq = ''
-        rand_freq_ind = randint(1,3)
+        rand_freq_ind = randint(1,4)
         if rand_freq_ind == 1:
-            b = 600000000
+            b = 1500000000
         elif rand_freq_ind == 2:
-            b = 700000000
+            b = 650000000
         elif rand_freq_ind == 3:
-            b = 800000000
+            b = 3000000000
         else:
-            b = 900000000
+            b = 10000000000
 
-        print('[{}] {} MHz ({})'.format(datetime.now(),(b/1e6),a))
+        if b < 1000000000:
+            print('[{}] {} MHz ({})'.format(datetime.now(),(b/1e6),a))
+        elif b >= 1000000000:
+            print('[{}] {} GHz ({})'.format(datetime.now(),(b/1e9),a))
 
         pool_resources = 'bluse_1,cbf_1,fbfuse_1,m000,m001'
 
@@ -88,8 +91,24 @@ with open('random_seed.csv') as f:
         for i in range(len(final_messages)-1):
             if final_messages[i].startswith('m0'):
                 continue
-            #print(chnls[i], final_messages[i])
-            r.publish(chnls[i], final_messages[i])
-            time.sleep(0.05)
+            elif final_messages[i].endswith('False'):
+                if final_messages[i+4].endswith('True'):
+                    r.publish(chnls[i], final_messages[i])
+                    print("Waiting 310 seconds...")
+                    time.sleep(310)
+            else:
+                r.publish(chnls[i], final_messages[i])
+                time.sleep(0.05)
 
-        time.sleep(5)
+        #for i in range(len(final_messages)-1):
+        #    if final_messages[i].startswith('m0'):
+        #        continue
+        #    elif 'data_suspect' in final_messages[i]:
+        #        r.publish(chnls[i], final_messages[i])
+        #        print("success")
+        #        time.sleep(300)
+        #    else:
+        #        r.publish(chnls[i], final_messages[i])
+        #        time.sleep(0.05)
+
+        #time.sleep(10)
