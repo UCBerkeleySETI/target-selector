@@ -170,7 +170,7 @@ class Triage(DatabaseHandler):
             return False
 
     def update_obs_status(self, source_id, obs_start_time,
-                          success, table='observation_status'):
+                          processed, table='observation_status'):
         """
         Function to update the status of the observation. For now, it only updates
         the success column, but should be flexible enough to update things like
@@ -181,7 +181,7 @@ class Triage(DatabaseHandler):
                 ID of the source being accessed
             obs_start_time: (datetime)
                 Start time of observation
-            success: (bool)
+            processed: (bool)
                 Status of the observation that is to be updated
             table: (...)
                 Table to be updated
@@ -192,11 +192,12 @@ class Triage(DatabaseHandler):
 
         update = """\
                     UPDATE {table}
-                    SET success = {success}
-                    WHERE (source_id = {id} AND obs_start_time = '{time}');
+                    SET processed = {processed}
+                    WHERE (source_id = {id} AND time = '{time}');
                  """.format(table=table, id=source_id,
                             time=parser.parse(obs_start_time),
-                            success=success)
+                            processed=processed)
+        # logger.info('Query:\n {}\n'.format(update))
         self.conn.execute(update)
 
     def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq):
@@ -450,6 +451,5 @@ class Triage(DatabaseHandler):
         print('\nTarget list for pointing coordinates ({}, {}) at {} Hz ({}):\n {}\n'.format(
             pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
             pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), current_freq, current_band, target_list))
-        print("64th source_id in target list:\n{}\n".format(target_list.iloc[63]))
-        print("Last source_id in target list: {} \n".format(target_list.iloc[len(target_list)-1]['source_id']))
+        print("{}th source_id in target list:\n{}\n".format(len(target_list),target_list.iloc[len(target_list)-1]))
         return target_list

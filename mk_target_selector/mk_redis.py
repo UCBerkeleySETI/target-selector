@@ -3,7 +3,10 @@ import json
 import yaml
 import time
 import threading
-from datetime import datetime
+import pandas as pd
+from io import StringIO
+from functools import reduce
+from datetime import datetime, timedelta
 from astropy import units as u
 from astropy.coordinates import Angle, SkyCoord
 
@@ -97,7 +100,8 @@ class Listen(threading.Thread):
             'pool_resources': self._pool_resources,
             'observation_status': self._status_update,
             'target': self._target_query,
-            'frequency': self._frequency
+            'frequency': self._frequency,
+            'processing_success': self._processing_success
         }
 
     def run(self):
@@ -112,17 +116,20 @@ class Listen(threading.Thread):
             except IndexError:
                 if 'target' in item['data']:
                     arr_item_data = item['data'].split(', ')
+                    product_id = arr_item_data[0].split(':')[0]
                     dec_coord_dms = arr_item_data[2]
                     dec_coord = dec_coord_dms.split(':')
                     d = float(dec_coord[0])
                     m = float(dec_coord[1])
                     s = float(dec_coord[2])
-                    if (d + m / 60 + s / 3600) > 45:
+                    if (d + m / 60 + s / 3600) > 45:  # coordinates out of MeerKAT's range
                         logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates\n'.format(
                             arr_item_data[1], arr_item_data[2]))
-                    else:
-                        print(Exception)
-                        pass
+                    else:  # no sources from target list in beam
+                        logger.info('No targets visible for coordinates ({}, {}) at {} Hz. '
+                                    'Waiting for new coordinates\n'.format(arr_item_data[1],
+                                                                           arr_item_data[2],
+                                                                           self.sensor_info[product_id]['frequency']))
 
     """
 
@@ -162,7 +169,8 @@ class Listen(threading.Thread):
         """
         if product_id not in self.sensor_info:
             self.sensor_info[product_id] = {'data_suspect': True, 'pointings': 0,
-                                            'targets': [], 'pool_resources': '', 'frequency': ''}
+                                            'targets': [], 'pool_resources': '',
+                                            'frequency': '', 'processing_success': []}
 
     def _deconfigure(self, product_id):
         """Response to deconfigure message from the redis alerts channel
@@ -177,10 +185,14 @@ class Listen(threading.Thread):
         sensor_list = ['processing', 'targets']
 
         for sensor in sensor_list:
-            key_glob = '{}:*:{}'.format(product_id, sensor)
+            key_glob = ('{}:*:{}'.format(product_id, sensor))
+            key_glob2 = ('{}:source_id*'.format(product_id))
             for k in self.redis_server.scan_iter(key_glob):
                 logger.info('Deconfigure message. Removing key: {}'.format(k))
                 delete_key(self.redis_server, k)
+            for j in self.redis_server.scan_iter(key_glob2):
+                logger.info('Deconfigure message. Removing key: {}'.format(j))
+                delete_key(self.redis_server, j)
 
         # TODO: update the database with information inside the sensor_info
         try:
@@ -213,6 +225,9 @@ class Listen(threading.Thread):
         if sensor.endswith('frequency'):
             sensor = 'frequency'
 
+        if sensor.startswith('source'):
+            sensor = 'processing_success'
+
         if product_id not in self.sensor_info.keys():
             self._configure(product_id)
 
@@ -241,7 +256,8 @@ class Listen(threading.Thread):
             p_num = self.sensor_info[product_id]['pointings']
             self.sensor_info[product_id][sensor] = coords
 
-            targets = self.engine.select_targets(coords.ra.rad, coords.dec.rad, beam_rad=self._beam_radius(product_id), current_freq=self.sensor_info[product_id].get('frequency', 'unknown'))
+            targets = self.engine.select_targets(coords.ra.rad, coords.dec.rad, beam_rad=self._beam_radius(product_id),
+                                                 current_freq=self.sensor_info[product_id].get('frequency', 'unknown'))
             self.sensor_info[product_id]['pointings'] += 1
             self.sensor_info[product_id]['targets'].append(targets)
             self._publish_targets(targets, product_id=product_id,
@@ -275,7 +291,8 @@ class Listen(threading.Thread):
         start = time.time()
         for i, t in enumerate(target_pointing):
             targets = self.engine.select_targets(*self.pointing_coords(t),
-                                                 beam_rad, current_freq=self.sensor_info[product_id].get('frequency', 'unknown'))
+                                                 beam_rad, current_freq=self.sensor_info[product_id].get('frequency',
+                                                                                                         'unknown'))
             self.sensor_info[product_id]['pointing_{}'.format(i)] = targets
             self._publish_targets(targets, product_id=product_id, sub_arr_id=i)
 
@@ -338,11 +355,65 @@ class Listen(threading.Thread):
 
         return current_freq
 
+    def _processing_success(self, message):
+        """Response to a successful processing message from the sensor_alerts channel.
+
+        Parameters:
+            message: (str)
+                Message passed over sensor_alerts channels. Acts as the key to
+                query Redis in the case of this function.
+
+        Returns:
+            asdf:.....
+                ...
+        """
+
+        product_id = message.split(':')[0]
+        sensor_name = message.split(':')[-1]
+        source_id = sensor_name.split('_')[-1]
+        value = get_redis_key(self.redis_server, message)
+        self.sensor_info[product_id]['processing_success'] = value
+        processing_success = value
+
+        # targets = str(get_redis_key('sensor_alerts', '*:*:{}'.format('targets')))
+
+        key_glob = ('{}:*:{}'.format(product_id, 'targets'))
+        for k in self.redis_server.scan_iter(key_glob):
+            q = get_redis_key(self.redis_server, k)
+            replace_chars = ("\"", ""), (":", ","), ("[", ""), ("], ", "\n"), ("]", ""),\
+                            ("{", ""), ("}", "")
+            formatted = reduce(lambda a, kv: a.replace(*kv), replace_chars, q)
+            data = StringIO(formatted)
+            df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
+            targets_to_process = df.transpose()
+            if targets_to_process['source_id'].str.contains(source_id).any():
+                # update observation_status with success message
+                self.engine.update_obs_status(source_id,
+                                              obs_start_time=str
+                                              (self.round_time(self
+                                                               .sensor_info[product_id]['start_time'],
+                                                               round_to=1*1)),
+                                              processed='TRUE')
+
+        return processing_success
+
     """
 
     Internal Methods
 
     """
+
+    def round_time(self, dt=None, round_to=60):
+        """Round a datetime object to any time lapse in seconds
+        dt : datetime.datetime object, default now.
+        roundTo : Closest number of seconds to round to, default 1 minute.
+        Author: Thierry Husson 2012.
+        """
+        if dt is None:
+            dt = datetime.now()
+        seconds = (dt.replace(tzinfo=None) - dt.min).seconds
+        rounding = (seconds + round_to / 2) // round_to * round_to
+        return dt + timedelta(0, rounding - seconds, -dt.microsecond)
 
     def load_schedule_block(self, message):
         """Reformats schedule block messages and reformats them into dictionary
@@ -453,7 +524,6 @@ class Listen(threading.Thread):
         # TODO: query frequency band sensor
         current_freq = self.sensor_info[product_id]['frequency']
         bands = self.engine._freqBand(current_freq)
-        # bands = 'L BAND'
 
         # antenna count
         n_antennas = antennas.count(',') + 1
@@ -503,7 +573,7 @@ class Listen(threading.Thread):
         """
 
         if not columns:
-            columns = ['ra', 'decl', 'priority']
+            columns = ['source_id', 'ra', 'decl', 'priority']
 
         targ_dict = targets.loc[:, columns].to_dict('list')
         key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)

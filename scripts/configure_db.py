@@ -49,7 +49,7 @@ class Observation(Base):
     file_id = Column(VARCHAR(45))
     mode = Column(INT)
     time = Column(TIMESTAMP)
-
+    processed = Column(Text)
 
 def cli(prog=sys.argv[0]):
     usage = "{} [options]".format(prog)

@@ -14,7 +14,7 @@ FENCHAN=4096
 HNCHAN=512
 HNTIME=256
 capture-init:array_1
-array_1:target:radec, 03:47:04.19, -23:45:26.3
+array_1:target:radec, 04:59:10.03, 43:01:03.0
 array_1:subarray_1_streams_wide_antenna_channelised_voltage_centre_frequency
 array_1:subarray_1_pool_resources
 capture-start:array_1
