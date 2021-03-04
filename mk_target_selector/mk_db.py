@@ -197,7 +197,7 @@ class Triage(DatabaseHandler):
                  """.format(table=table, id=source_id,
                             time=parser.parse(obs_start_time),
                             processed=processed)
-        # logger.info('Query:\n {}\n'.format(update))
+        logger.info('Query:\n {}\n'.format(update))
         self.conn.execute(update)
 
     def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq):

@@ -134,6 +134,7 @@ with open('random_seed.csv') as f:
                 r.publish(chnls[i], final_messages[i])
                 time.sleep(0.05)
             elif final_messages[i].startswith('deconfigure'):
+                time.sleep(5)
                 r.publish(chnls[i], final_messages[i])
                 time.sleep(5)
             else:

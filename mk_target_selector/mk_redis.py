@@ -387,12 +387,12 @@ class Listen(threading.Thread):
             df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
             targets_to_process = df.transpose()
             if targets_to_process['source_id'].str.contains(source_id).any():
+                print(self.sensor_info[product_id]['start_time'])
                 # update observation_status with success message
                 self.engine.update_obs_status(source_id,
                                               obs_start_time=str
                                               (self.round_time(self
-                                                               .sensor_info[product_id]['start_time'],
-                                                               round_to=1*1)),
+                                                               .sensor_info[product_id]['start_time'])),
                                               processed='TRUE')
 
         return processing_success
@@ -403,17 +403,23 @@ class Listen(threading.Thread):
 
     """
 
-    def round_time(self, dt=None, round_to=60):
-        """Round a datetime object to any time lapse in seconds
-        dt : datetime.datetime object, default now.
-        roundTo : Closest number of seconds to round to, default 1 minute.
-        Author: Thierry Husson 2012.
+    def round_time(self, timestamp):
+        """Function to round timestamp values to nearest second for database matching
+
+        Parameters:
+            dt: (datetime)
+                asdf
+
+        Returns:
+            None
         """
-        if dt is None:
-            dt = datetime.now()
-        seconds = (dt.replace(tzinfo=None) - dt.min).seconds
-        rounding = (seconds + round_to / 2) // round_to * round_to
-        return dt + timedelta(0, rounding - seconds, -dt.microsecond)
+        dt = str(timestamp)
+        date = dt.split()[0]
+        h, m, s = [dt.split()[1].split(':')[0],
+                   dt.split()[1].split(':')[1],
+                   str(round(float(dt.split()[1].split(':')[-1])))]
+        rounded = "{} {}:{}:{}".format(date, h, m, s)
+        return rounded
 
     def load_schedule_block(self, message):
         """Reformats schedule block messages and reformats them into dictionary
