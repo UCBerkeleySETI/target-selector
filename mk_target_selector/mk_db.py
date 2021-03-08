@@ -197,7 +197,6 @@ class Triage(DatabaseHandler):
                  """.format(table=table, id=source_id,
                             time=parser.parse(obs_start_time),
                             processed=processed)
-        logger.info('Query:\n {}\n'.format(update))
         self.conn.execute(update)
 
     def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq):
@@ -313,28 +312,29 @@ class Triage(DatabaseHandler):
         priority = np.full(tb.shape[0], 2, dtype=int)
 
         query = """
-                SELECT source_id, antennas, n_antennas, bands, max(duration) AS duration
+                SELECT source_id, antennas, n_antennas, bands, processed, max(duration) AS duration
                 FROM {} 
-                GROUP BY source_id, antennas, n_antennas, bands
+                GROUP BY source_id, antennas, n_antennas, bands, processed
                 """.format(table)
 
         # TODO replace these with sqlalchemy queries
 
         # list of previous observations
         prev_obs = pd.read_sql(query, con=self.conn)
-        print(prev_obs.drop('antennas', axis=1), "\n")
-        prev_obs.to_csv('prev_obs.csv')
+        print("Previous observations:\n{}\n".format(prev_obs.drop('antennas', axis=1)))
+        # prev_obs.to_csv('prev_obs.csv')
+        successfully_processed = prev_obs.drop('antennas', axis=1).loc[prev_obs['processed'].isin(['1'])]
 
         # exotica sources
         priority[tb['table_name'].str.contains('exotica')] = 3
 
-        # sources previously observed
-        priority[tb['source_id'].isin(prev_obs['source_id'])] = 6
+        # sources previously observed & successfully processed
+        priority[tb['source_id'].isin(successfully_processed['source_id'])] = 6
 
         # sources previously observed, but at a different frequency
-        prev_freq = prev_obs.drop('antennas', axis=1).groupby('source_id').agg(lambda x: ', '.join(x.values))
-        longest_obs = prev_obs.groupby('source_id')['duration'].max()
-        most_antennas = prev_obs.groupby('source_id')['n_antennas'].max()
+        prev_freq = successfully_processed.groupby('source_id').agg(lambda x: ', '.join(x.values))
+        longest_obs = successfully_processed.groupby('source_id')['duration'].max()
+        most_antennas = successfully_processed.groupby('source_id')['n_antennas'].max()
         current_band = self._freqBand(current_freq)
 
         for p in tb['source_id']:
@@ -406,7 +406,7 @@ class Triage(DatabaseHandler):
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con=self.conn)
         sorting_priority = self.triage(tb, current_freq)
-        target_list = sorting_priority.sort_values(by=['priority', 'dist_c']).reset_index().iloc[:64]
+        target_list = sorting_priority.sort_values(by=['priority', 'dist_c']).reset_index()
         self.output_targets(target_list, c_ra, c_dec, current_freq)
         return target_list
 
@@ -451,5 +451,4 @@ class Triage(DatabaseHandler):
         print('\nTarget list for pointing coordinates ({}, {}) at {} Hz ({}):\n {}\n'.format(
             pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
             pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), current_freq, current_band, target_list))
-        print("{}th source_id in target list:\n{}\n".format(len(target_list),target_list.iloc[len(target_list)-1]))
         return target_list

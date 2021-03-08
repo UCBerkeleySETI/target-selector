@@ -387,7 +387,6 @@ class Listen(threading.Thread):
             df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
             targets_to_process = df.transpose()
             if targets_to_process['source_id'].str.contains(source_id).any():
-                print(self.sensor_info[product_id]['start_time'])
                 # update observation_status with success message
                 self.engine.update_obs_status(source_id,
                                               obs_start_time=str

@@ -31,7 +31,7 @@ pool_resources = 'bluse_1,cbf_1,fbfuse_1,m000,m001'
 # m023,m024,m025,m026,m027,m028,m029,m030,m031,m032,m033,m034,m035,m036,m037,m038,m039,m040,m041,m042,m043,m044,m045,
 # m046,m048,m049,m050,m051,m052,m053,m054,m055,m056,m057,m058,m059,m060,m061,m063,ptuse_4,sdp_1,tuse_'
 
-frequency = '10000000000'
+frequency = '650000000'
 
 publish_key('sensor_alerts', 'array_1:subarray_1_pool_resources', pool_resources)
 
@@ -47,21 +47,23 @@ for i in range(len(msgs)-1):
             time.sleep(5)
     elif msgs[i+1].startswith('deconfigure'):
         try:
-            targets = str(r.get('array_1:pointing_0:targets'), 'utf-8')
-            w = targets.replace("\"","")
-            e = w.replace(":",",")
-            t = e.replace("[","")
-            y = t.replace("], ","\n")
-            u = y.replace("]","")
-            o = u.replace("{","")
-            p = o.replace("}","")
-            data = StringIO(p)
-            df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
-            targetsFinal = df.transpose()
-            print("\n",targetsFinal)
-            for s in targetsFinal['source_id']:
-                time.sleep(3)
-                publish_key('sensor_alerts', 'array_1:source_id_{}'.format(s.lstrip()), 'success')
+            key_glob = '*:*:targets'
+            for k in r.scan_iter(key_glob):
+                product_id = (str(k)[1:].replace("\'", "")).split(':')[0]
+                targets = str(r.get(k), 'utf-8')
+                w = targets.replace("\"", "")
+                e = w.replace(":", ",")
+                t = e.replace("[", "")
+                y = t.replace("], ", "\n")
+                u = y.replace("]", "")
+                o = u.replace("{", "")
+                p = o.replace("}", "")
+                data = StringIO(p)
+                df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
+                targetsFinal = df.transpose()
+                print("\n",targetsFinal)
+                for s in targetsFinal['source_id']:
+                    publish_key('sensor_alerts', '{}:source_id_{}'.format(product_id, s.lstrip()), 'success')
         except TypeError:  # array_1:pointing_0:targets empty (NoneType)
             print(Exception)
             pass
@@ -69,7 +71,7 @@ for i in range(len(msgs)-1):
             print(type(k), k)
             pass
         r.publish(chnls[i], msgs[i])
-        time.sleep(5)
+        time.sleep(0.5)
     elif msgs[i].startswith('deconfigure'):
         time.sleep(5)
         r.publish(chnls[i], msgs[i])

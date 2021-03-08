@@ -90,18 +90,6 @@ with open('random_seed.csv') as f:
             elif d >= 17:
                 final_messages.append(line)
 
-        # for i in range(len(final_messages)-1):
-        #    if final_messages[i].startswith('m0'):
-        #        continue
-        #    elif final_messages[i].endswith('False'):
-        #        if final_messages[i+4].endswith('True'):
-        #            r.publish(chnls[i], final_messages[i])
-        #            print("Waiting 310 seconds...")
-        #            time.sleep(2)
-        #    else:
-        #        r.publish(chnls[i], final_messages[i])
-        #        time.sleep(0.05)
-
         for i in range(len(final_messages)-1):
             if final_messages[i].startswith('m0'):
                 continue
@@ -112,20 +100,23 @@ with open('random_seed.csv') as f:
                     time.sleep(5)
             elif final_messages[i+1].startswith('deconfigure'):
                 try:
-                    targets = str(r.get('array_1:pointing_0:targets'), 'utf-8')
-                    w = targets.replace("\"","")
-                    e = w.replace(":",",")
-                    t = e.replace("[","")
-                    y = t.replace("], ","\n")
-                    u = y.replace("]","")
-                    o = u.replace("{","")
-                    p = o.replace("}","")
-                    data = StringIO(p)
-                    df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
-                    targetsFinal = df.transpose()
-                    # print("\n",targetsFinal)
-                    for s in targetsFinal['source_id']:
-                        publish_key('sensor_alerts', 'array_1:source_id_{}'.format(s.lstrip()), 'success')
+                    key_glob = '*:*:targets'
+                    for k in r.scan_iter(key_glob):
+                        product_id = (str(k)[1:].replace("\'", "")).split(':')[0]
+                        targets = str(r.get(k), 'utf-8')
+                        w = targets.replace("\"", "")
+                        e = w.replace(":", ",")
+                        t = e.replace("[", "")
+                        y = t.replace("], ", "\n")
+                        u = y.replace("]", "")
+                        o = u.replace("{", "")
+                        p = o.replace("}", "")
+                        data = StringIO(p)
+                        df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
+                        targetsFinal = df.transpose()
+                        # print("\n",targetsFinal)
+                        for s in targetsFinal['source_id']:
+                            publish_key('sensor_alerts', '{}:source_id_{}'.format(product_id, s.lstrip()), 'success')
                 except TypeError:  # array_1:pointing_0:targets empty (NoneType)
                     pass
                 except Exception as k:
