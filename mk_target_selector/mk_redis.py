@@ -28,8 +28,6 @@ except ImportError:
                              connect_to_redis,
                              delete_key)
 
-final_target = "0"
-
 
 class ProcessingStatus(object):
     def __init__(self, value):
@@ -48,8 +46,11 @@ class ProcessingStatus(object):
         del self._proc_status
 
 
+final_target = "0"
+total_targets = 0
 pStatus = ProcessingStatus("ready")
 time_at_receipt = 0
+proc_start_time = 0
 
 
 class Listen(threading.Thread):
@@ -135,12 +136,15 @@ class Listen(threading.Thread):
         chnls_to_process = []
         data_to_process = []
         time_to_process = []
+        product_id = "0"
         global time_at_receipt
         for item in self.p.listen():
             if pStatus.proc_status == "ready":
                 try:
                     time_at_receipt = datetime.now()
                     self._message_to_func(item['channel'], self.channel_actions)(item['data'])
+                    if item['data'].startswith("configure"):
+                        product_id = item['data'].split(":")[1]
                 except IndexError:
                     self.coord_error(item['data'])
             elif pStatus.proc_status == "processing":
@@ -152,7 +156,53 @@ class Listen(threading.Thread):
                     logger.info("Cannot append table of messages to process: {}".format(e))
                 d = {'channel': chnls_to_process, 'data': data_to_process, 'time': time_to_process}
                 msgs_to_process = pd.DataFrame(d)
-                if final_target in str(msgs_to_process['data']):
+                fraction_processed = ((len(msgs_to_process[msgs_to_process['data']
+                                           .str.contains(r'(?!$)source_id(?!$)')].index))/total_targets)
+                if (fraction_processed > 0.9) and ((datetime.now() - proc_start_time).total_seconds() > 300):
+                    logger.info("Processing time has exceeded 5 minutes, "
+                                "with {}% of targets ({}/{}) processed successfully. Aborting processing"
+                                .format((fraction_processed*100), len(msgs_to_process[msgs_to_process['data']
+                                                                      .str.contains(r'(?!$)source_id(?!$)')].index),
+                                        total_targets))
+                    try:
+                        logger.info("Replaying missed messages")
+                        for index, row in msgs_to_process.iterrows():
+                            time_at_receipt = row['time']
+                            self._message_to_func(row['channel'], self.channel_actions)(row['data'])
+                        logger.info("Missed messages successfully replayed")
+                        chnls_to_process = []
+                        data_to_process = []
+                        time_to_process = []
+                        self._deconfigure(product_id)
+                        logger.info("Processing state set to \'ready\'")
+                        pStatus.proc_status = "ready"
+                    except IndexError:
+                        self.coord_error(item['data'])
+                    except Exception as e:
+                        logger.info("Failed to replay missed messages and reset processing state to \'ready\': {}"
+                                    .format(e))
+                        break
+                elif (datetime.now() - proc_start_time).total_seconds() > 1200:
+                    logger.info("Processing time has exceeded 20 minutes. Aborting processing")
+                    try:
+                        logger.info("Replaying missed messages")
+                        for index, row in msgs_to_process.iterrows():
+                            time_at_receipt = row['time']
+                            self._message_to_func(row['channel'], self.channel_actions)(row['data'])
+                        logger.info("Missed messages successfully replayed")
+                        chnls_to_process = []
+                        data_to_process = []
+                        time_to_process = []
+                        self._deconfigure(product_id)
+                        logger.info("Processing state set to \'ready\'")
+                        pStatus.proc_status = "ready"
+                    except IndexError:
+                        self.coord_error(item['data'])
+                    except Exception as e:
+                        logger.info("Failed to replay missed messages and reset processing state to \'ready\': {}"
+                                    .format(e))
+                        break
+                elif final_target in str(msgs_to_process['data']):
                     logger.info("Final target has been successfully processed")
                     try:
                         logger.info("Replaying missed messages")
@@ -487,11 +537,12 @@ class Listen(threading.Thread):
         """Function to round timestamp values to nearest second for database matching
 
         Parameters:
-            dt: (datetime)
+            timestamp: (datetime)
                 asdf
 
         Returns:
-            None
+            rounded: (datetime)
+                asdf
         """
         dt = str(timestamp)
         date = dt.split()[0]
@@ -658,6 +709,8 @@ class Listen(threading.Thread):
             None
         """
         global final_target
+        global total_targets
+        global proc_start_time
 
         if not columns:
             columns = ['source_id', 'ra', 'decl', 'priority']
@@ -667,8 +720,10 @@ class Listen(threading.Thread):
         write_pair_redis(self.redis_server, key, json.dumps(targ_dict))
         publish(self.redis_server, channel, key)
         final_target = self.reformat_table(str(targ_dict))['\'source_id\''].iloc[-1].replace("\'", "").lstrip()
+        total_targets = len(self.reformat_table(str(targ_dict))['\'source_id\''].index)
         logger.info('Targets published to {}'.format(channel))
         pStatus.proc_status = "processing"
+        proc_start_time = datetime.now()
         logger.info("Processing state set to \'processing\'")
         # logger.info("pStatus.proc_status: {}".format(pStatus.proc_status))
 

@@ -43,8 +43,8 @@ for i in range(len(msgs)-1):
     elif msgs[i].endswith('False'):
         if msgs[i+4].endswith('True'):
             r.publish(chnls[i], msgs[i])
-            print("Observing for 300 seconds...")
-            time.sleep(310)
+            print("Observing for 5 seconds...")
+            time.sleep(5)
     elif msgs[i+1].startswith('deconfigure'):
         try:
             key_glob = '*:*:targets'
