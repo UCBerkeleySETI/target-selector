@@ -28,6 +28,28 @@ except ImportError:
                              connect_to_redis,
                              delete_key)
 
+final_target = "0"
+
+
+class ProcessingStatus(object):
+    def __init__(self, value):
+        self._proc_status = value
+
+    @property
+    def proc_status(self):
+        return self._proc_status
+
+    @proc_status.setter
+    def proc_status(self, value):
+        self._proc_status = value
+
+    @proc_status.deleter
+    def proc_status(self):
+        del self._proc_status
+
+
+pStatus = ProcessingStatus("ready")
+
 
 class Listen(threading.Thread):
     """
@@ -109,27 +131,42 @@ class Listen(threading.Thread):
            redis channels. Main function that handles the processing of the
            messages that come through redis.
         """
-
+        chnls_to_process = []
+        data_to_process = []
         for item in self.p.listen():
-            try:
-                self._message_to_func(item['channel'], self.channel_actions)(item['data'])
-            except IndexError:
-                if 'target' in item['data']:
-                    arr_item_data = item['data'].split(', ')
-                    product_id = arr_item_data[0].split(':')[0]
-                    dec_coord_dms = arr_item_data[2]
-                    dec_coord = dec_coord_dms.split(':')
-                    d = float(dec_coord[0])
-                    m = float(dec_coord[1])
-                    s = float(dec_coord[2])
-                    if (d + m / 60 + s / 3600) > 45:  # coordinates out of MeerKAT's range
-                        logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates\n'.format(
-                            arr_item_data[1], arr_item_data[2]))
-                    else:  # no sources from target list in beam
-                        logger.info('No targets visible for coordinates ({}, {}) at {} Hz. '
-                                    'Waiting for new coordinates\n'.format(arr_item_data[1],
-                                                                           arr_item_data[2],
-                                                                           self.sensor_info[product_id]['frequency']))
+            if pStatus.proc_status == "ready":
+                try:
+                    self._message_to_func(item['channel'], self.channel_actions)(item['data'])
+                except IndexError:
+                    self.coord_error(item['data'])
+            elif pStatus.proc_status == "processing":
+                try:
+                    chnls_to_process.append(item['channel'])
+                    data_to_process.append(item['data'])
+                except Exception as e:
+                    logger.info("Cannot append table of messages to process: {}".format(e))
+                d = {'channel': chnls_to_process, 'data': data_to_process}
+                msgs_to_process = pd.DataFrame(d)
+                if final_target in str(msgs_to_process['data']):
+                    logger.info("Final target has been successfully processed")
+                    try:
+                        logger.info("Replaying missed messages")
+                        for index, row in msgs_to_process.iterrows():
+                            self._message_to_func(row['channel'], self.channel_actions)(row['data'])
+                        logger.info("Missed messages successfully replayed")
+                        chnls_to_process = []
+                        data_to_process = []
+                        logger.info("Processing state set to \'ready\'")
+                        pStatus.proc_status = "ready"
+                        # logger.info("pStatus.proc_status: {}".format(pStatus.proc_status))
+                    except IndexError:
+                        self.coord_error(item['data'])
+                    except Exception as e:
+                        logger.info("Failed to replay missed messages and reset processing state to \'ready\': {}"
+                                    .format(e))
+                        break
+                else:  # not a relevant success message
+                    pass
 
     """
 
@@ -191,7 +228,7 @@ class Listen(threading.Thread):
                 logger.info('Deconfigure message. Removing key: {}'.format(k))
                 delete_key(self.redis_server, k)
             for j in self.redis_server.scan_iter(key_glob2):
-                logger.info('Deconfigure message. Removing key: {}'.format(j))
+                # logger.info('Deconfigure message. Removing key: {}'.format(j))
                 delete_key(self.redis_server, j)
 
         # TODO: update the database with information inside the sensor_info
@@ -373,20 +410,12 @@ class Listen(threading.Thread):
         source_id = sensor_name.split('_')[-1]
         value = get_redis_key(self.redis_server, message)
         self.sensor_info[product_id]['processing_success'] = value
-        processing_success = value
-
-        # targets = str(get_redis_key('sensor_alerts', '*:*:{}'.format('targets')))
 
         key_glob = ('{}:*:{}'.format(product_id, 'targets'))
         for k in self.redis_server.scan_iter(key_glob):
             q = get_redis_key(self.redis_server, k)
-            replace_chars = ("\"", ""), (":", ","), ("[", ""), ("], ", "\n"), ("]", ""),\
-                            ("{", ""), ("}", "")
-            formatted = reduce(lambda a, kv: a.replace(*kv), replace_chars, q)
-            data = StringIO(formatted)
-            df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
-            targets_to_process = df.transpose()
-            if targets_to_process['source_id'].str.contains(source_id).any():
+            # logger.info(self.reformat_table(q)['source_id'].iloc[-1].lstrip())
+            if self.reformat_table(q)['source_id'].str.contains(source_id).any():
                 # update observation_status with success message
                 self.engine.update_obs_status(source_id,
                                               obs_start_time=str
@@ -394,13 +423,58 @@ class Listen(threading.Thread):
                                                                .sensor_info[product_id]['start_time'])),
                                               processed='TRUE')
 
-        return processing_success
-
     """
 
     Internal Methods
 
     """
+
+    def reformat_table(self, table):
+        """Function to reformat the table of targets pushed to the backend
+
+        Parameters:
+            table: (asdf)
+                asdf
+
+        Returns:
+            targets_to_process: (asdf)
+                asdf
+        """
+        replace_chars = ("\"", ""), (":", ","), ("[", ""), ("], ", "\n"), ("]", ""), \
+                        ("{", ""), ("}", "")
+        formatted = reduce(lambda a, kv: a.replace(*kv), replace_chars, table)
+        data = StringIO(formatted)
+        df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
+        targets_to_process = df.transpose()
+        return targets_to_process
+
+    def coord_error(self, data):
+        """Function to handle errors due to coordinate values (empty pointings or out of range)
+
+        Parameters:
+            data: (string)
+                string to parse containing erroneous coordinates
+
+        Returns:
+            None
+        """
+        if 'target' in data:
+            arr_item_data = data.split(', ')
+            product_id = arr_item_data[0].split(':')[0]
+            dec_coord_dms = arr_item_data[2]
+            dec_coord = dec_coord_dms.split(':')
+            d = float(dec_coord[0])
+            m = float(dec_coord[1])
+            s = float(dec_coord[2])
+            if (d + m / 60 + s / 3600) > 45:  # coordinates out of MeerKAT's range
+                logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates\n'
+                            .format(arr_item_data[1], arr_item_data[2]))
+            else:  # no sources from target list in beam
+                logger.info('No targets visible for coordinates ({}, {}) at {} Hz. '
+                            'Waiting for new coordinates\n'
+                            .format(arr_item_data[1],
+                                    arr_item_data[2],
+                                    self.sensor_info[product_id]['frequency']))
 
     def round_time(self, timestamp):
         """Function to round timestamp values to nearest second for database matching
@@ -576,6 +650,7 @@ class Listen(threading.Thread):
         Returns:
             None
         """
+        global final_target
 
         if not columns:
             columns = ['source_id', 'ra', 'decl', 'priority']
@@ -584,7 +659,11 @@ class Listen(threading.Thread):
         key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
         write_pair_redis(self.redis_server, key, json.dumps(targ_dict))
         publish(self.redis_server, channel, key)
+        final_target = self.reformat_table(str(targ_dict))['\'source_id\''].iloc[-1].replace("\'", "").lstrip()
         logger.info('Targets published to {}'.format(channel))
+        pStatus.proc_status = "processing"
+        logger.info("Processing state set to \'processing\'")
+        # logger.info("pStatus.proc_status: {}".format(pStatus.proc_status))
 
     def pointing_coords(self, t_str):
         """Function used to clean up run loop and parse pointing information

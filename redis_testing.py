@@ -62,8 +62,10 @@ for i in range(len(msgs)-1):
                 df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
                 targetsFinal = df.transpose()
                 print("\n",targetsFinal)
+                time.sleep(10)
                 for s in targetsFinal['source_id']:
                     publish_key('sensor_alerts', '{}:source_id_{}'.format(product_id, s.lstrip()), 'success')
+                    print('sensor_alerts', '{}:source_id_{}'.format(product_id, s.lstrip()), 'success')
         except TypeError:  # array_1:pointing_0:targets empty (NoneType)
             print(Exception)
             pass
