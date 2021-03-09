@@ -227,7 +227,8 @@ class Triage(DatabaseHandler):
         """
         current_band = self._freqBand(current_freq)
         beam_rad_arcmin = beam_rad * (180 / math.pi) * 60
-        print("\nBeam radius at {} Hz ({}): {} radians = {} arc minutes\n".format(current_freq, current_band, beam_rad, beam_rad_arcmin))
+        print("\nBeam radius at {} ({}): {} radians = {} arc minutes\n".format(self.freq_format(current_freq),
+                                                                               current_band, beam_rad, beam_rad_arcmin))
         if c_dec - beam_rad <= - np.pi / 2.0:
             ra_min, ra_max = 0.0, 2.0 * np.pi
             dec_min = -np.pi / 2.0
@@ -444,11 +445,33 @@ class Triage(DatabaseHandler):
         plt.close()
         pointing_coord = coord.SkyCoord(ra=c_ra * u.rad, dec=c_dec * u.rad, frame='icrs')
 
-        logger.info('Plot of targets for pointing coordinates ({}, {}) at {} Hz ({}) saved successfully'.format(
+        logger.info('Plot of targets for pointing coordinates ({}, {}) at {} ({}) saved successfully'.format(
             pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
-            pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), current_freq, current_band))
+            pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True),
+            self.freq_format(current_freq), current_band))
 
-        print('\nTarget list for pointing coordinates ({}, {}) at {} Hz ({}):\n {}\n'.format(
+        print('\nTarget list for pointing coordinates ({}, {}) at {} ({}):\n {}\n'.format(
             pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
-            pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), current_freq, current_band, target_list))
+            pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), self.freq_format(current_freq),
+            current_band, target_list))
         return target_list
+
+    def freq_format(self, current_freq):
+        """Function to format current frequency to either MHz or GHz for output
+
+        Parameters:
+            current_freq : asdf
+                asdf
+        Returns:
+            freq_formatted : asdf
+                asdf
+        """
+
+        if float(current_freq) > 1000000000:
+            gigahertz = float(current_freq) * 10**-9
+            freq_formatted = "{} GHz".format(gigahertz)
+        else:
+            megahertz = float(current_freq) * 10**-6
+            freq_formatted = "{} MHz".format(megahertz)
+
+        return freq_formatted
