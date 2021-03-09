@@ -49,6 +49,7 @@ class ProcessingStatus(object):
 
 
 pStatus = ProcessingStatus("ready")
+time_at_receipt = 0
 
 
 class Listen(threading.Thread):
@@ -133,9 +134,12 @@ class Listen(threading.Thread):
         """
         chnls_to_process = []
         data_to_process = []
+        time_to_process = []
+        global time_at_receipt
         for item in self.p.listen():
             if pStatus.proc_status == "ready":
                 try:
+                    time_at_receipt = datetime.now()
                     self._message_to_func(item['channel'], self.channel_actions)(item['data'])
                 except IndexError:
                     self.coord_error(item['data'])
@@ -143,19 +147,22 @@ class Listen(threading.Thread):
                 try:
                     chnls_to_process.append(item['channel'])
                     data_to_process.append(item['data'])
+                    time_to_process.append(datetime.now())
                 except Exception as e:
                     logger.info("Cannot append table of messages to process: {}".format(e))
-                d = {'channel': chnls_to_process, 'data': data_to_process}
+                d = {'channel': chnls_to_process, 'data': data_to_process, 'time': time_to_process}
                 msgs_to_process = pd.DataFrame(d)
                 if final_target in str(msgs_to_process['data']):
                     logger.info("Final target has been successfully processed")
                     try:
                         logger.info("Replaying missed messages")
                         for index, row in msgs_to_process.iterrows():
+                            time_at_receipt = row['time']
                             self._message_to_func(row['channel'], self.channel_actions)(row['data'])
                         logger.info("Missed messages successfully replayed")
                         chnls_to_process = []
                         data_to_process = []
+                        time_to_process = []
                         logger.info("Processing state set to \'ready\'")
                         pStatus.proc_status = "ready"
                         # logger.info("pStatus.proc_status: {}".format(pStatus.proc_status))
@@ -346,12 +353,12 @@ class Listen(threading.Thread):
         # If data_suspect is currently True and the new value is False, update the dictionary
         if self.sensor_info[product_id]['data_suspect'] and not value:
             self.sensor_info[product_id]['data_suspect'] = False
-            self.sensor_info[product_id]['start_time'] = datetime.now()
+            self.sensor_info[product_id]['start_time'] = time_at_receipt
 
         # If data_suspect is current False and the new value is True, set end time
         elif not self.sensor_info[product_id]['data_suspect'] and value:
             self.sensor_info[product_id]['data_suspect'] = True
-            self.sensor_info[product_id]['end_time'] = datetime.now()
+            self.sensor_info[product_id]['end_time'] = time_at_receipt
             self.store_metadata(product_id)
 
     def _pool_resources(self, message):
