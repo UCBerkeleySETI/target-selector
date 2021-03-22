@@ -43,8 +43,8 @@ for i in range(len(msgs)-1):
     elif msgs[i].endswith('False'):
         if msgs[i+4].endswith('True'):
             r.publish(chnls[i], msgs[i])
-            print("Observing for 5 seconds...")
-            time.sleep(5)
+            print("Observing for 20 seconds...")
+            time.sleep(20)
     elif msgs[i+1].startswith('deconfigure'):
         try:
             key_glob = '*:*:targets'
@@ -64,8 +64,10 @@ for i in range(len(msgs)-1):
                 print("\n",targetsFinal)
                 time.sleep(10)
                 for s in targetsFinal['source_id']:
-                    publish_key('sensor_alerts', '{}:source_id_{}'.format(product_id, s.lstrip()), 'success')
-                    print('sensor_alerts', '{}:source_id_{}'.format(product_id, s.lstrip()), 'success')
+                    publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
+                time.sleep(10)
+                for s in targetsFinal['source_id']:
+                    publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
         except TypeError:  # array_1:pointing_0:targets empty (NoneType)
             print(Exception)
             pass

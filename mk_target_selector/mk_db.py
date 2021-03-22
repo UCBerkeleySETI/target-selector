@@ -165,7 +165,7 @@ class Triage(DatabaseHandler):
             return True
 
         except Exception as e:
-            print(e)
+            logger.info(e)
             logger.warning('Was not able to add sources to the database!')
             return False
 
@@ -227,7 +227,7 @@ class Triage(DatabaseHandler):
         """
         current_band = self._freqBand(current_freq)
         beam_rad_arcmin = beam_rad * (180 / math.pi) * 60
-        print("\nBeam radius at {} ({}): {} radians = {} arc minutes\n".format(self.freq_format(current_freq),
+        logger.info("Beam radius at {} ({}): {} radians = {} arc minutes".format(self.freq_format(current_freq),
                                                                                current_band, beam_rad, beam_rad_arcmin))
         if c_dec - beam_rad <= - np.pi / 2.0:
             ra_min, ra_max = 0.0, 2.0 * np.pi
@@ -322,7 +322,7 @@ class Triage(DatabaseHandler):
 
         # list of previous observations
         prev_obs = pd.read_sql(query, con=self.conn)
-        print("Previous observations:\n{}\n".format(prev_obs.drop('antennas', axis=1)))
+        # logger.info("Previous observations:\n{}\n".format(prev_obs.drop('antennas', axis=1)))
         # prev_obs.to_csv('prev_obs.csv')
         successfully_processed = prev_obs.drop('antennas', axis=1).loc[prev_obs['processed'].isin(['1'])]
 
@@ -408,7 +408,7 @@ class Triage(DatabaseHandler):
         tb = pd.read_sql(query, con=self.conn)
         sorting_priority = self.triage(tb, current_freq)
         target_list = sorting_priority.sort_values(by=['priority', 'dist_c']).reset_index()
-        self.output_targets(target_list, c_ra, c_dec, current_freq)
+        # self.output_targets(target_list, c_ra, c_dec, current_freq)
         return target_list
 
     def output_targets(self, target_list, c_ra, c_dec, current_freq='Unknown'):

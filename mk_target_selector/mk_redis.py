@@ -4,6 +4,7 @@ import yaml
 import time
 import threading
 import pandas as pd
+import numpy as np
 from io import StringIO
 from functools import reduce
 from datetime import datetime, timedelta
@@ -49,8 +50,7 @@ class ProcessingStatus(object):
 final_target = "0"
 total_targets = 0
 pStatus = ProcessingStatus("ready")
-time_at_receipt = 0
-proc_start_time = 0
+proc_start_time = datetime.now()
 
 
 class Listen(threading.Thread):
@@ -110,22 +110,25 @@ class Listen(threading.Thread):
 
         self.alerts_actions = {
             'deconfigure': self._deconfigure,
-            'configure': self._configure,
+            'configure': self._pass,
+            # 'configure': self._configure,
             'conf_complete': self._pass,
             'capture-init': self._pass,
-            'capture-start': self._pass,
-            'capture-stop': self._pass,
-            'capture-done': self._pass
+            'capture-start': self._capture_start,
+            'capture-stop': self._capture_stop,
+            'capture-done': self._pass,
         }
 
         self.sensor_actions = {
-            'data_suspect': self._data_suspect,
+            'data_suspect': self._pass,
             'schedule_blocks': self._pass,
             'pool_resources': self._pool_resources,
             'observation_status': self._status_update,
             'target': self._target_query,
             'frequency': self._frequency,
-            'processing_success': self._processing_success
+            'processing_success': self._processing_success,
+            'acknowledge': self._acknowledge,
+            'target_selector': self._pass
         }
 
     def run(self):
@@ -133,97 +136,71 @@ class Listen(threading.Thread):
            redis channels. Main function that handles the processing of the
            messages that come through redis.
         """
-        chnls_to_process = []
-        data_to_process = []
-        time_to_process = []
-        product_id = "0"
-        global time_at_receipt
+
+        # target_key = '*:target_selector:*'
+        # for m in self.redis_server.scan_iter(target_key):
+        #     delete_key(self.redis_server, m)
+
         for item in self.p.listen():
-            if pStatus.proc_status == "ready":
+            time_elapsed = (datetime.now() - proc_start_time).total_seconds()
+
+            try:
+                self._message_to_func(item['channel'], self.channel_actions)(item['data'])
+            except Exception as e:
+                logger.info(e, type(e))
+            #     self.coord_error(item['data'])
+
+            if ("target_selector:target_list" in item['data']) or ("deconfigure" in item['data']):
+                pass
+            else:
+                self.fetch_data(item['data'])
+
+    def fetch_data(self, message):
+        """Runs continuously to fetch telescope status data and select targets if and when
+           the status of the targets selector is ready & telescope status data is stored
+        """
+        product_ids = []
+        target_selector_key = "*:target_selector:*"
+        for k in self.redis_server.scan_iter(target_selector_key):
+            product_id = k.split(":")[0]
+            product_ids.append(product_id)
+
+        for k in set(product_ids):
+            if ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:coords".format(k))))\
+                    and ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:frequency".format(k))))\
+                    and ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:pool_resources".format(k))))\
+                    and (pStatus.proc_status == "ready"):
                 try:
-                    time_at_receipt = datetime.now()
-                    self._message_to_func(item['channel'], self.channel_actions)(item['data'])
-                    if item['data'].startswith("configure"):
-                        product_id = item['data'].split(":")[1]
-                except IndexError:
-                    self.coord_error(item['data'])
-            elif pStatus.proc_status == "processing":
-                try:
-                    chnls_to_process.append(item['channel'])
-                    data_to_process.append(item['data'])
-                    time_to_process.append(datetime.now())
-                except Exception as e:
-                    logger.info("Cannot append table of messages to process: {}".format(e))
-                d = {'channel': chnls_to_process, 'data': data_to_process, 'time': time_to_process}
-                msgs_to_process = pd.DataFrame(d)
-                fraction_processed = ((len(msgs_to_process[msgs_to_process['data']
-                                           .str.contains(r'(?!$)source_id(?!$)')].index))/total_targets)
-                if (fraction_processed > 0.9) and ((datetime.now() - proc_start_time).total_seconds() > 300):
-                    logger.info("Processing time has exceeded 5 minutes, "
-                                "with {}% of targets ({}/{}) processed successfully. Aborting processing"
-                                .format((fraction_processed*100), len(msgs_to_process[msgs_to_process['data']
-                                                                      .str.contains(r'(?!$)source_id(?!$)')].index),
-                                        total_targets))
-                    try:
-                        logger.info("Replaying missed messages")
-                        for index, row in msgs_to_process.iterrows():
-                            time_at_receipt = row['time']
-                            self._message_to_func(row['channel'], self.channel_actions)(row['data'])
-                        logger.info("Missed messages successfully replayed")
-                        chnls_to_process = []
-                        data_to_process = []
-                        time_to_process = []
-                        self._deconfigure(product_id)
-                        logger.info("Processing state set to \'ready\'")
-                        pStatus.proc_status = "ready"
-                    except IndexError:
-                        self.coord_error(item['data'])
-                    except Exception as e:
-                        logger.info("Failed to replay missed messages and reset processing state to \'ready\': {}"
-                                    .format(e))
-                        break
-                elif (datetime.now() - proc_start_time).total_seconds() > 1200:
-                    logger.info("Processing time has exceeded 20 minutes. Aborting processing")
-                    try:
-                        logger.info("Replaying missed messages")
-                        for index, row in msgs_to_process.iterrows():
-                            time_at_receipt = row['time']
-                            self._message_to_func(row['channel'], self.channel_actions)(row['data'])
-                        logger.info("Missed messages successfully replayed")
-                        chnls_to_process = []
-                        data_to_process = []
-                        time_to_process = []
-                        self._deconfigure(product_id)
-                        logger.info("Processing state set to \'ready\'")
-                        pStatus.proc_status = "ready"
-                    except IndexError:
-                        self.coord_error(item['data'])
-                    except Exception as e:
-                        logger.info("Failed to replay missed messages and reset processing state to \'ready\': {}"
-                                    .format(e))
-                        break
-                elif final_target in str(msgs_to_process['data']):
-                    logger.info("Final target has been successfully processed")
-                    try:
-                        logger.info("Replaying missed messages")
-                        for index, row in msgs_to_process.iterrows():
-                            time_at_receipt = row['time']
-                            self._message_to_func(row['channel'], self.channel_actions)(row['data'])
-                        logger.info("Missed messages successfully replayed")
-                        chnls_to_process = []
-                        data_to_process = []
-                        time_to_process = []
-                        logger.info("Processing state set to \'ready\'")
-                        pStatus.proc_status = "ready"
-                        # logger.info("pStatus.proc_status: {}".format(pStatus.proc_status))
-                    except IndexError:
-                        self.coord_error(item['data'])
-                    except Exception as e:
-                        logger.info("Failed to replay missed messages and reset processing state to \'ready\': {}"
-                                    .format(e))
-                        break
-                else:  # not a relevant success message
+                    coords = get_redis_key(self.redis_server, "{}:target_selector:coords".format(k))
+                    coords_ra = float(coords.split(", ")[0])
+                    coords_dec = float(coords.split(", ")[1])
+                    self.sensor_info[k]['target'] = get_redis_key(self.redis_server, "{}:target_selector:coords".format(k))
+                    logger.info("Fetched {}:target_selector:coords: {}".format(k, self.sensor_info[k]['target']))
+                    self.sensor_info[k]['frequency'] = get_redis_key(self.redis_server, "{}:target_selector:frequency"
+                                                                     .format(k))
+                    logger.info("Fetched {}:target_selector:frequency: {}".format(k, self.sensor_info[k]['frequency']))
+                    self.sensor_info[k]['pool_resources'] = get_redis_key(self.redis_server,
+                                                                          "{}:target_selector:pool_resources"
+                                                                          .format(k))
+                    logger.info("Fetched {}:target_selector:pool_resources: {}"
+                                .format(k, self.sensor_info[k]['pool_resources']))
+
+                    targets = self.engine.select_targets(np.deg2rad(coords_ra), np.deg2rad(coords_dec),
+                                                         beam_rad=self._beam_radius(k),
+                                                         current_freq=self.sensor_info[k]['frequency'])
+                    targets_table = pd.DataFrame.to_csv(targets)
+
+                    if len(targets.index) == 0:
+                        self.coord_error(coords=self.sensor_info[k]['target'],
+                                         frequency=self.sensor_info[k]['frequency'])
+                    else:
+                        write_pair_redis(self.redis_server, "{}:target_selector:target_list".format(k), targets_table)
+                        publish(self.redis_server, "sensor_alerts", "{}:target_selector:target_list".format(k))
+
+                except KeyError as e:
                     pass
+
+
 
     """
 
@@ -261,10 +238,11 @@ class Listen(threading.Thread):
                 product_id for this particular subarray
 
         """
+        logger.info("Configure message received: {}".format(product_id))
         if product_id not in self.sensor_info:
             self.sensor_info[product_id] = {'data_suspect': True, 'pointings': 0,
                                             'targets': [], 'pool_resources': '',
-                                            'frequency': '', 'processing_success': []}
+                                            'frequency': ''}
 
     def _deconfigure(self, product_id):
         """Response to deconfigure message from the redis alerts channel
@@ -280,19 +258,72 @@ class Listen(threading.Thread):
 
         for sensor in sensor_list:
             key_glob = ('{}:*:{}'.format(product_id, sensor))
-            key_glob2 = ('{}:source_id*'.format(product_id))
-            for k in self.redis_server.scan_iter(key_glob):
-                logger.info('Deconfigure message. Removing key: {}'.format(k))
-                delete_key(self.redis_server, k)
-            for j in self.redis_server.scan_iter(key_glob2):
-                # logger.info('Deconfigure message. Removing key: {}'.format(j))
-                delete_key(self.redis_server, j)
+            success_key_glob = ('{}:success_source_id*'.format(product_id))
+            ackn_key_glob = ('{}:acknowledge_source_id*'.format(product_id))
+            selector_key_glob = ("{}:target_selector:*".format(product_id))
+            for a in self.redis_server.scan_iter(key_glob):
+                logger.info('Deconfigure message received. Removing key: {}'.format(a))
+                delete_key(self.redis_server, a)
+            for b in self.redis_server.scan_iter(success_key_glob):
+                # logger.info('Deconfigure message. Removing key: {}'.format(b))
+                delete_key(self.redis_server, b)
+            for c in self.redis_server.scan_iter(ackn_key_glob):
+                # logger.info('Deconfigure message. Removing key: {}'.format(c))
+                delete_key(self.redis_server, c)
+            for d in self.redis_server.scan_iter(selector_key_glob):
+                # logger.info('Deconfigure message. Removing key: {}'.format(c))
+                delete_key(self.redis_server, d)
 
         # TODO: update the database with information inside the sensor_info
         try:
             del self.sensor_info[product_id]
         except KeyError:
             logger.info('Deconfigure message received before configure message')
+
+    def _capture_start(self, message):
+        """Block that responds to capture start updates. Upon receipt the target list is published & observation
+         start time taken
+
+       Parameters:
+            message: (...)
+                ...
+        Returns:
+            None
+        """
+        logger.info("Capture start message received: {}".format(message))
+        product_id = message.split(":")[-1]
+        sub_arr_id = self.sensor_info[product_id]['pointings']
+        # print(self.sensor_info[product_id]['targets'][0])
+        try:
+            pulled_targets = StringIO(get_redis_key(self.redis_server,
+                                                    "{}:target_selector:target_list".format(product_id)))
+
+            targets_df = pd.read_csv(pulled_targets, sep=",", index_col=0)
+            self.sensor_info[product_id]['targets'] = targets_df
+            targets_to_publish = self.sensor_info[product_id]['targets']
+            logger.info("Targets to publish:\n{}\n".format(targets_to_publish))
+            self.sensor_info[product_id]['start_time'] = datetime.now()
+            self._publish_targets(targets_to_publish, product_id, sub_arr_id)
+        except pd.errors.EmptyDataError:  # no targets in table to parse
+            pass
+
+    def _capture_stop(self, message):
+        """Block that responds to capture stop updates. Takes observing end time and stores metadata
+
+       Parameters:
+            message: (...)
+                ...
+        Returns:
+            None
+        """
+        logger.info("Capture stop message received: {}".format(message))
+        product_id = message.split(":")[-1]
+
+        try:
+            self.sensor_info[product_id]['end_time'] = datetime.now()
+            self.store_metadata(product_id)
+        except KeyError:  # no observation start time stored, ergo no target sources in FoV
+            pass
 
     """
 
@@ -319,8 +350,14 @@ class Listen(threading.Thread):
         if sensor.endswith('frequency'):
             sensor = 'frequency'
 
-        if sensor.startswith('source'):
+        if sensor.startswith('success'):
             sensor = 'processing_success'
+
+        if sensor.startswith('acknowledge'):
+            sensor = 'acknowledge'
+
+        if sensor.startswith('target_selector'):
+            sensor = 'target_selector'
 
         if product_id not in self.sensor_info.keys():
             self._configure(product_id)
@@ -346,16 +383,14 @@ class Listen(threading.Thread):
             return
 
         else:
+            logger.info("Target coordinate message received: {}".format(message))
             coords = SkyCoord(' '.join(value.split(', ')[-2:]), unit=(u.hourangle, u.deg))
-            p_num = self.sensor_info[product_id]['pointings']
-            self.sensor_info[product_id][sensor] = coords
-
-            targets = self.engine.select_targets(coords.ra.rad, coords.dec.rad, beam_rad=self._beam_radius(product_id),
-                                                 current_freq=self.sensor_info[product_id].get('frequency', 'unknown'))
-            self.sensor_info[product_id]['pointings'] += 1
-            self.sensor_info[product_id]['targets'].append(targets)
-            self._publish_targets(targets, product_id=product_id,
-                                  sub_arr_id=p_num)
+            # p_num = self.sensor_info[product_id]['pointings']
+            coord_key = "{}:target_selector:coords".format(product_id)
+            coord_value = "{}, {}".format(coords.ra.deg, coords.dec.deg)
+            write_pair_redis(self.redis_server, coord_key, coord_value)
+            publish(self.redis_server, "sensor_alerts", coord_key)
+            logger.info("Published {} to sensor_alerts: {}".format(coord_key, coord_value))
 
     def _schedule_blocks(self, key, target_pointing, beam_rad):
         """Block that responds to schedule block updates. Searches for targets
@@ -393,24 +428,6 @@ class Listen(threading.Thread):
         logger.info('{} pointings processed in {} seconds'.format(len(target_pointing),
                                                                   time.time() - start))
 
-    def _data_suspect(self, message):
-        """Response to a data_suspect message from the sensor_alerts channel.
-        """
-
-        product_id, _, value = message.split(':')
-        value = str_to_bool(value)
-
-        # If data_suspect is currently True and the new value is False, update the dictionary
-        if self.sensor_info[product_id]['data_suspect'] and not value:
-            self.sensor_info[product_id]['data_suspect'] = False
-            self.sensor_info[product_id]['start_time'] = time_at_receipt
-
-        # If data_suspect is current False and the new value is True, set end time
-        elif not self.sensor_info[product_id]['data_suspect'] and value:
-            self.sensor_info[product_id]['data_suspect'] = True
-            self.sensor_info[product_id]['end_time'] = time_at_receipt
-            self.store_metadata(product_id)
-
     def _pool_resources(self, message):
         """Response to a pool_resources message from the sensor_alerts channel.
 
@@ -422,10 +439,15 @@ class Listen(threading.Thread):
         Returns:
             None
         """
+        logger.info("Pool resources message received: {}".format(message))
 
         product_id, _ = message.split(':')
         value = get_redis_key(self.redis_server, message)
-        self.sensor_info[product_id]['pool_resources'] = value
+
+        pool_resources_key = "{}:target_selector:pool_resources".format(product_id)
+        write_pair_redis(self.redis_server, pool_resources_key, value)
+        publish(self.redis_server, "sensor_alerts", pool_resources_key)
+        logger.info("Published {} to sensor_alerts: {}".format(pool_resources_key, value))
 
     def _frequency(self, message):
         """Response to a frequency message from the sensor_alerts channel.
@@ -441,16 +463,21 @@ class Listen(threading.Thread):
             current_band:.....
                 Current frequency band of observation
         """
+        logger.info("Frequency message received: {}".format(message))
 
         product_id, sensor_name = message.split(':')
         value = get_redis_key(self.redis_server, message)
-        self.sensor_info[product_id]['frequency'] = value
+
+        frequency_key = "{}:target_selector:frequency".format(product_id)
+        write_pair_redis(self.redis_server, frequency_key, value)
+        publish(self.redis_server, "sensor_alerts", frequency_key)
+        logger.info("Published {} to sensor_alerts: {}".format(frequency_key, value))
         current_freq = value
 
         return current_freq
 
     def _processing_success(self, message):
-        """Response to a successful processing message from the sensor_alerts channel.
+        """Response to a successful processing success message from the sensor_alerts channel.
 
         Parameters:
             message: (str)
@@ -465,20 +492,50 @@ class Listen(threading.Thread):
         product_id = message.split(':')[0]
         sensor_name = message.split(':')[-1]
         source_id = sensor_name.split('_')[-1]
-        value = get_redis_key(self.redis_server, message)
-        self.sensor_info[product_id]['processing_success'] = value
+        # value = get_redis_key(self.redis_server, message)
+        # self.sensor_info[product_id]['processing_success'] = value
 
+        # update observation_status with success message
+        self.engine.update_obs_status(source_id,
+                                      obs_start_time=str(self.round_time(self.sensor_info[product_id]['start_time'])),
+                                      processed='TRUE')
+
+        if final_target in message:
+            logger.info("Confirmation of successful processing of all sources received from processing nodes")
+            pStatus.proc_status = "ready"
+            logger.info("Processing state set to \'ready\'")
+
+    def _acknowledge(self, message):
+        """Response to a successful acknowledgement message from the sensor_alerts channel.
+
+        Parameters:
+            message: (str)
+                Message passed over sensor_alerts channels. Acts as the key to
+                query Redis in the case of this function.
+
+        Returns:
+            asdf:.....
+                ...
+        """
+        global proc_start_time
+
+        product_id = message.split(':')[0]
+
+        # if message contains final target source_id,
         key_glob = ('{}:*:{}'.format(product_id, 'targets'))
         for k in self.redis_server.scan_iter(key_glob):
             q = get_redis_key(self.redis_server, k)
-            # logger.info(self.reformat_table(q)['source_id'].iloc[-1].lstrip())
-            if self.reformat_table(q)['source_id'].str.contains(source_id).any():
-                # update observation_status with success message
-                self.engine.update_obs_status(source_id,
-                                              obs_start_time=str
-                                              (self.round_time(self
-                                                               .sensor_info[product_id]['start_time'])),
-                                              processed='TRUE')
+            if self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
+                # all sources have been received by the processing nodes
+                # begin processing time
+                # pStatus.proc_status = "processing"
+                logger.info("Receipt of all targets confirmed by processing nodes")
+                # logger.info("Processing state set to \'processing\'")
+                proc_start_time = datetime.now()
+                # logger.info("pStatus.proc_status: {}".format(pStatus.proc_status))
+
+
+
 
     """
 
@@ -505,33 +562,31 @@ class Listen(threading.Thread):
         targets_to_process = df.transpose()
         return targets_to_process
 
-    def coord_error(self, data):
+    def coord_error(self, coords, frequency):
         """Function to handle errors due to coordinate values (empty pointings or out of range)
 
         Parameters:
             data: (string)
                 string to parse containing erroneous coordinates
+            coords: (string)
+                string to parse containing erroneous coordinates
+            frequency: (string)
+                string to parse containing erroneous coordinates
 
         Returns:
             None
         """
-        if 'target' in data:
-            arr_item_data = data.split(', ')
-            product_id = arr_item_data[0].split(':')[0]
-            dec_coord_dms = arr_item_data[2]
-            dec_coord = dec_coord_dms.split(':')
-            d = float(dec_coord[0])
-            m = float(dec_coord[1])
-            s = float(dec_coord[2])
-            if (d + m / 60 + s / 3600) > 45:  # coordinates out of MeerKAT's range
-                logger.info('Selected coordinates ({}, {}) unavailable. Waiting for new coordinates\n'
-                            .format(arr_item_data[1], arr_item_data[2]))
-            else:  # no sources from target list in beam
-                logger.info('No targets visible for coordinates ({}, {}) at {} Hz. '
-                            'Waiting for new coordinates\n'
-                            .format(arr_item_data[1],
-                                    arr_item_data[2],
-                                    self.sensor_info[product_id]['frequency']))
+        arr_ra_dec = coords.split(', ')
+        dec_coord = arr_ra_dec[1]
+        if float(dec_coord) > 45:  # coordinates out of MeerKAT's range
+            logger.info('Selected coordinates ({}) unavailable. Waiting for new coordinates'
+                        .format(coords))
+        else:  # no sources from target list in beam
+            logger.info('No targets visible for coordinates ({}) at {} Hz. Waiting for new coordinates'
+                        .format(coords, frequency))
+
+        pStatus.proc_status = "ready"
+        # logger.info("Processing state set to \'ready\'")
 
     def round_time(self, timestamp):
         """Function to round timestamp values to nearest second for database matching
@@ -656,7 +711,7 @@ class Listen(threading.Thread):
         end = self.sensor_info[product_id]['end_time']
 
         # TODO: Change this to handle specific pointing in subarray
-        targets = self.sensor_info[product_id]['targets'][0]
+        targets = self.sensor_info[product_id]['targets']
 
         # TODO: query frequency band sensor
         current_freq = self.sensor_info[product_id]['frequency']
@@ -683,12 +738,12 @@ class Listen(threading.Thread):
         """
 
         # TODO: change this to the real name
-        current_freq = float(self.sensor_info[product_id]['frequency'])
+        current_freq = float(get_redis_key(self.redis_server, "{}:target_selector:frequency".format(product_id)))
         beam_rad = (2.998e8 / current_freq) / dish_size
         return beam_rad
 
-    def _publish_targets(self, targets, product_id, sub_arr_id=0, sensor_name='targets',
-                         columns=None, channel='bluse:///set'):
+    def _publish_targets(self, targets, product_id, channel, columns=None,
+                         sub_arr_id=0, sensor_name='targets'):
         """Reformat the table returned from target searching
 
         Parameters:
@@ -710,11 +765,11 @@ class Listen(threading.Thread):
         """
         global final_target
         global total_targets
-        global proc_start_time
 
         if not columns:
             columns = ['source_id', 'ra', 'decl', 'priority']
 
+        channel = "bluse:///set"
         targ_dict = targets.loc[:, columns].to_dict('list')
         key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
         write_pair_redis(self.redis_server, key, json.dumps(targ_dict))
@@ -723,9 +778,7 @@ class Listen(threading.Thread):
         total_targets = len(self.reformat_table(str(targ_dict))['\'source_id\''].index)
         logger.info('Targets published to {}'.format(channel))
         pStatus.proc_status = "processing"
-        proc_start_time = datetime.now()
-        logger.info("Processing state set to \'processing\'")
-        # logger.info("pStatus.proc_status: {}".format(pStatus.proc_status))
+        logger.info("Processing state set to 'processing\'")
 
     def pointing_coords(self, t_str):
         """Function used to clean up run loop and parse pointing information
