@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt  # for location plot
 import astropy.coordinates as coord  # for location plot
 import astropy.units as u  # for location plot
 from dateutil import parser
-# from datetime import datetime
+from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.engine.url import URL
 import yaml
@@ -151,7 +151,8 @@ class Triage(DatabaseHandler):
         """
 
         source_tb = df.loc[:, ['source_id']]
-        source_tb['duration'] = (end_time - start_time).total_seconds()
+        source_tb['duration'] = (datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S.%f")
+                                 - datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
         source_tb['time'] = start_time
         source_tb['mode'] = mode
         source_tb['file_id'] = file_id

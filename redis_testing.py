@@ -65,9 +65,11 @@ for i in range(len(msgs)-1):
                 time.sleep(10)
                 for s in targetsFinal['source_id']:
                     publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
+                    print('sensor alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
                 time.sleep(10)
                 for s in targetsFinal['source_id']:
                     publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
+                    print('sensor alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
         except TypeError:  # array_1:pointing_0:targets empty (NoneType)
             print(Exception)
             pass

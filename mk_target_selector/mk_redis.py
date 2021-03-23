@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from io import StringIO
 from functools import reduce
-from datetime import datetime, timedelta
+from datetime import datetime
 from astropy import units as u
 from astropy.coordinates import Angle, SkyCoord
 
@@ -101,8 +101,6 @@ class Listen(threading.Thread):
         # Database connection and triaging
         self.engine = Triage(config_file)
 
-        self.sensor_info = {}
-
         self.channel_actions = {
             'alerts': self._alerts,
             'sensor_alerts': self._sensor_alerts,
@@ -128,7 +126,8 @@ class Listen(threading.Thread):
             'frequency': self._frequency,
             'processing_success': self._processing_success,
             'acknowledge': self._acknowledge,
-            'target_selector': self._pass
+            'target_selector': self._pass,
+            'current_obs': self._pass
         }
 
     def run(self):
@@ -143,64 +142,68 @@ class Listen(threading.Thread):
 
         for item in self.p.listen():
             time_elapsed = (datetime.now() - proc_start_time).total_seconds()
-
-            try:
-                self._message_to_func(item['channel'], self.channel_actions)(item['data'])
-            except Exception as e:
-                logger.info(e, type(e))
+            self._message_to_func(item['channel'], self.channel_actions)(item['data'])
             #     self.coord_error(item['data'])
 
-            if ("target_selector:target_list" in item['data']) or ("deconfigure" in item['data']):
-                pass
-            else:
-                self.fetch_data(item['data'])
-
-    def fetch_data(self, message):
+    def fetch_data(self, product_id):
         """Runs continuously to fetch telescope status data and select targets if and when
            the status of the targets selector is ready & telescope status data is stored
         """
-        product_ids = []
-        target_selector_key = "*:target_selector:*"
-        for k in self.redis_server.scan_iter(target_selector_key):
-            product_id = k.split(":")[0]
-            product_ids.append(product_id)
+        if ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:coords"
+                                                               .format(product_id))))\
+                and ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:frequency"
+                                                                        .format(product_id))))\
+                and ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:pool_resources"
+                                                                        .format(product_id))))\
+                and (pStatus.proc_status == "ready"):
+            try:
+                coords = get_redis_key(self.redis_server, "{}:target_selector:coords".format(product_id))
+                coords_ra = float(coords.split(", ")[0])
+                coords_dec = float(coords.split(", ")[1])
 
-        for k in set(product_ids):
-            if ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:coords".format(k))))\
-                    and ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:frequency".format(k))))\
-                    and ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:pool_resources".format(k))))\
-                    and (pStatus.proc_status == "ready"):
-                try:
-                    coords = get_redis_key(self.redis_server, "{}:target_selector:coords".format(k))
-                    coords_ra = float(coords.split(", ")[0])
-                    coords_dec = float(coords.split(", ")[1])
-                    self.sensor_info[k]['target'] = get_redis_key(self.redis_server, "{}:target_selector:coords".format(k))
-                    logger.info("Fetched {}:target_selector:coords: {}".format(k, self.sensor_info[k]['target']))
-                    self.sensor_info[k]['frequency'] = get_redis_key(self.redis_server, "{}:target_selector:frequency"
-                                                                     .format(k))
-                    logger.info("Fetched {}:target_selector:frequency: {}".format(k, self.sensor_info[k]['frequency']))
-                    self.sensor_info[k]['pool_resources'] = get_redis_key(self.redis_server,
-                                                                          "{}:target_selector:pool_resources"
-                                                                          .format(k))
-                    logger.info("Fetched {}:target_selector:pool_resources: {}"
-                                .format(k, self.sensor_info[k]['pool_resources']))
+                # create redis key-val pairs to store current observation data & current telescope status data
 
-                    targets = self.engine.select_targets(np.deg2rad(coords_ra), np.deg2rad(coords_dec),
-                                                         beam_rad=self._beam_radius(k),
-                                                         current_freq=self.sensor_info[k]['frequency'])
-                    targets_table = pd.DataFrame.to_csv(targets)
+                new_coords = get_redis_key(self.redis_server, "{}:target_selector:coords".format(product_id))
+                new_freq = get_redis_key(self.redis_server, "{}:target_selector:frequency".format(product_id))
+                new_pool = get_redis_key(self.redis_server, "{}:target_selector:pool_resources".format(product_id))
 
-                    if len(targets.index) == 0:
-                        self.coord_error(coords=self.sensor_info[k]['target'],
-                                         frequency=self.sensor_info[k]['frequency'])
-                    else:
-                        write_pair_redis(self.redis_server, "{}:target_selector:target_list".format(k), targets_table)
-                        publish(self.redis_server, "sensor_alerts", "{}:target_selector:target_list".format(k))
+                write_pair_redis(self.redis_server, "{}:current_obs:coords".format(product_id), new_coords)
+                publish(self.redis_server, "sensor_alerts", "{}:current_obs:coords".format(product_id))
+                logger.info("Fetched {}:current_obs:coords: {}"
+                            .format(product_id, get_redis_key(self.redis_server, "{}:current_obs:coords".format(product_id))))
 
-                except KeyError as e:
-                    pass
+                write_pair_redis(self.redis_server, "{}:current_obs:frequency".format(product_id), new_freq)
+                publish(self.redis_server, "sensor_alerts", "{}:current_obs:frequency".format(product_id))
+                logger.info("Fetched {}:current_obs:frequency: {}"
+                            .format(product_id, get_redis_key(self.redis_server, "{}:current_obs:frequency".format(product_id))))
 
+                write_pair_redis(self.redis_server, "{}:current_obs:pool_resources".format(product_id), new_pool)
+                publish(self.redis_server, "sensor_alerts", "{}:current_obs:pool_resources".format(product_id))
+                logger.info("Fetched {}:current_obs:pool_resources: {}"
+                            .format(product_id, get_redis_key(self.redis_server, "{}:current_obs:pool_resources".format(product_id))))
 
+                targets = self\
+                    .engine.select_targets(np.deg2rad(coords_ra),
+                                           np.deg2rad(coords_dec),
+                                           current_freq=get_redis_key(self.redis_server, "{}:current_obs:frequency"
+                                                                          .format(product_id)),
+                                           beam_rad=self._beam_radius(get_redis_key(self.redis_server,
+                                                                                    "{}:current_obs:frequency"
+                                                                                    .format(product_id))))
+
+                targets_table = pd.DataFrame.to_csv(targets)
+
+                if len(targets.index) == 0:
+                    self.coord_error(coords=get_redis_key(self.redis_server,
+                                                          "{}:current_obs:coords".format(product_id)),
+                                     frequency=get_redis_key(self.redis_server,
+                                                             "{}:current_obs:frequency".format(product_id)))
+                else:
+                    write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id), targets_table)
+                    publish(self.redis_server, "sensor_alerts", "{}:current_obs:target_list".format(product_id))
+
+            except KeyError:
+                pass
 
     """
 
@@ -228,22 +231,6 @@ class Listen(threading.Thread):
         """
         return 0
 
-    def _configure(self, product_id):
-        """Response to a configure message from the redis alerts channel. This
-           sets up a dictionary which stores sensor information for a particular
-           product_id
-
-        Parameters:
-            product_id: (str)
-                product_id for this particular subarray
-
-        """
-        logger.info("Configure message received: {}".format(product_id))
-        if product_id not in self.sensor_info:
-            self.sensor_info[product_id] = {'data_suspect': True, 'pointings': 0,
-                                            'targets': [], 'pool_resources': '',
-                                            'frequency': ''}
-
     def _deconfigure(self, product_id):
         """Response to deconfigure message from the redis alerts channel
 
@@ -261,6 +248,7 @@ class Listen(threading.Thread):
             success_key_glob = ('{}:success_source_id*'.format(product_id))
             ackn_key_glob = ('{}:acknowledge_source_id*'.format(product_id))
             selector_key_glob = ("{}:target_selector:*".format(product_id))
+            current_key_glob = ("{}:current_obs:*".format(product_id))
             for a in self.redis_server.scan_iter(key_glob):
                 logger.info('Deconfigure message received. Removing key: {}'.format(a))
                 delete_key(self.redis_server, a)
@@ -271,14 +259,13 @@ class Listen(threading.Thread):
                 # logger.info('Deconfigure message. Removing key: {}'.format(c))
                 delete_key(self.redis_server, c)
             for d in self.redis_server.scan_iter(selector_key_glob):
-                # logger.info('Deconfigure message. Removing key: {}'.format(c))
+                # logger.info('Deconfigure message. Removing key: {}'.format(d))
                 delete_key(self.redis_server, d)
+            for e in self.redis_server.scan_iter(current_key_glob):
+                # logger.info('Deconfigure message. Removing key: {}'.format(e))
+                delete_key(self.redis_server, e)
 
         # TODO: update the database with information inside the sensor_info
-        try:
-            del self.sensor_info[product_id]
-        except KeyError:
-            logger.info('Deconfigure message received before configure message')
 
     def _capture_start(self, message):
         """Block that responds to capture start updates. Upon receipt the target list is published & observation
@@ -290,22 +277,25 @@ class Listen(threading.Thread):
         Returns:
             None
         """
+
         logger.info("Capture start message received: {}".format(message))
         product_id = message.split(":")[-1]
-        sub_arr_id = self.sensor_info[product_id]['pointings']
-        # print(self.sensor_info[product_id]['targets'][0])
-        try:
-            pulled_targets = StringIO(get_redis_key(self.redis_server,
-                                                    "{}:target_selector:target_list".format(product_id)))
 
-            targets_df = pd.read_csv(pulled_targets, sep=",", index_col=0)
-            self.sensor_info[product_id]['targets'] = targets_df
-            targets_to_publish = self.sensor_info[product_id]['targets']
+        self.fetch_data(product_id)
+
+        if "None" not in str(get_redis_key(self.redis_server, "{}:current_obs:target_list".format(product_id))):
+            sub_arr_id = "0"
+            pulled_targets = StringIO(get_redis_key(self.redis_server,
+                                                    "{}:current_obs:target_list".format(product_id)))
+
+            targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
             logger.info("Targets to publish:\n{}\n".format(targets_to_publish))
-            self.sensor_info[product_id]['start_time'] = datetime.now()
+
+            obs_start_time = datetime.now()
+            write_pair_redis(self.redis_server, "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
+            publish(self.redis_server, "sensor_alerts", "{}:current_obs:obs_start_time".format(product_id))
+
             self._publish_targets(targets_to_publish, product_id, sub_arr_id)
-        except pd.errors.EmptyDataError:  # no targets in table to parse
-            pass
 
     def _capture_stop(self, message):
         """Block that responds to capture stop updates. Takes observing end time and stores metadata
@@ -319,11 +309,14 @@ class Listen(threading.Thread):
         logger.info("Capture stop message received: {}".format(message))
         product_id = message.split(":")[-1]
 
-        try:
-            self.sensor_info[product_id]['end_time'] = datetime.now()
-            self.store_metadata(product_id)
-        except KeyError:  # no observation start time stored, ergo no target sources in FoV
-            pass
+        if "None" not in str(get_redis_key(self.redis_server, "{}:current_obs:target_list".format(product_id))):
+            try:
+                obs_end_time = datetime.now()
+                write_pair_redis(self.redis_server, "{}:current_obs:obs_end_time".format(product_id), str(obs_end_time))
+                publish(self.redis_server, "sensor_alerts", "{}:current_obs:obs_end_time".format(product_id))
+                self.store_metadata(product_id)
+            except Exception as e:
+                logger.info(e)
 
     """
 
@@ -359,8 +352,8 @@ class Listen(threading.Thread):
         if sensor.startswith('target_selector'):
             sensor = 'target_selector'
 
-        if product_id not in self.sensor_info.keys():
-            self._configure(product_id)
+        if sensor.startswith('current_obs'):
+            sensor = 'current_obs'
 
         self._message_to_func(sensor, self.sensor_actions)(message)
 
@@ -385,7 +378,6 @@ class Listen(threading.Thread):
         else:
             logger.info("Target coordinate message received: {}".format(message))
             coords = SkyCoord(' '.join(value.split(', ')[-2:]), unit=(u.hourangle, u.deg))
-            # p_num = self.sensor_info[product_id]['pointings']
             coord_key = "{}:target_selector:coords".format(product_id)
             coord_value = "{}, {}".format(coords.ra.deg, coords.dec.deg)
             write_pair_redis(self.redis_server, coord_key, coord_value)
@@ -420,9 +412,10 @@ class Listen(threading.Thread):
         start = time.time()
         for i, t in enumerate(target_pointing):
             targets = self.engine.select_targets(*self.pointing_coords(t),
-                                                 beam_rad, current_freq=self.sensor_info[product_id].get('frequency',
-                                                                                                         'unknown'))
-            self.sensor_info[product_id]['pointing_{}'.format(i)] = targets
+                                                 beam_rad,
+                                                 current_freq=get_redis_key(self.redis_server,
+                                                                            "{}:current_obs:frequency"
+                                                                            .format(product_id)))
             self._publish_targets(targets, product_id=product_id, sub_arr_id=i)
 
         logger.info('{} pointings processed in {} seconds'.format(len(target_pointing),
@@ -472,9 +465,9 @@ class Listen(threading.Thread):
         write_pair_redis(self.redis_server, frequency_key, value)
         publish(self.redis_server, "sensor_alerts", frequency_key)
         logger.info("Published {} to sensor_alerts: {}".format(frequency_key, value))
-        current_freq = value
+        # current_freq = value
 
-        return current_freq
+        # return current_freq
 
     def _processing_success(self, message):
         """Response to a successful processing success message from the sensor_alerts channel.
@@ -492,13 +485,14 @@ class Listen(threading.Thread):
         product_id = message.split(':')[0]
         sensor_name = message.split(':')[-1]
         source_id = sensor_name.split('_')[-1]
-        # value = get_redis_key(self.redis_server, message)
-        # self.sensor_info[product_id]['processing_success'] = value
 
         # update observation_status with success message
         self.engine.update_obs_status(source_id,
-                                      obs_start_time=str(self.round_time(self.sensor_info[product_id]['start_time'])),
-                                      processed='TRUE')
+                                      obs_start_time=str(self
+                                                         .round_time
+                                                         (get_redis_key(self.redis_server,
+                                                                        "{}:current_obs:obs_start_time"
+                                                                        .format(product_id)))), processed='TRUE')
 
         if final_target in message:
             logger.info("Confirmation of successful processing of all sources received from processing nodes")
@@ -586,7 +580,6 @@ class Listen(threading.Thread):
                         .format(coords, frequency))
 
         pStatus.proc_status = "ready"
-        # logger.info("Processing state set to \'ready\'")
 
     def round_time(self, timestamp):
         """Function to round timestamp values to nearest second for database matching
@@ -703,18 +696,20 @@ class Listen(threading.Thread):
         """Stores observation metadata in database.
         """
 
-        pool_resources = self.sensor_info[product_id]['pool_resources']
+        pool_resources = get_redis_key(self.redis_server, "{}:current_obs:pool_resources".format(product_id))
 
         antennas = ','.join(re.findall(r'm\d{3}', pool_resources))
         proxies = ','.join(re.findall(r'[a-z A-Z]+_\d', pool_resources))
-        start = self.sensor_info[product_id]['start_time']
-        end = self.sensor_info[product_id]['end_time']
+        start = get_redis_key(self.redis_server, "{}:current_obs:obs_start_time".format(product_id))
+        end = get_redis_key(self.redis_server, "{}:current_obs:obs_end_time".format(product_id))
 
         # TODO: Change this to handle specific pointing in subarray
-        targets = self.sensor_info[product_id]['targets']
+        targets = pd.read_csv(StringIO(get_redis_key(self.redis_server,
+                                                     "{}:current_obs:target_list".format(product_id))),
+                              sep=",", index_col=0)
 
         # TODO: query frequency band sensor
-        current_freq = self.sensor_info[product_id]['frequency']
+        current_freq = get_redis_key(self.redis_server, "{}:current_obs:frequency".format(product_id))
         bands = self.engine._freqBand(current_freq)
 
         # antenna count
@@ -724,7 +719,7 @@ class Listen(threading.Thread):
         file_id = 'filler_file_id'
         self.engine.add_sources_to_db(targets, start, end, proxies, antennas, n_antennas, file_id, bands)
 
-    def _beam_radius(self, product_id, dish_size=13.5):
+    def _beam_radius(self, current_freq, dish_size=13.5):
         """Returns the beam radius based on the frequency band used in the
            observation
 
@@ -738,8 +733,7 @@ class Listen(threading.Thread):
         """
 
         # TODO: change this to the real name
-        current_freq = float(get_redis_key(self.redis_server, "{}:target_selector:frequency".format(product_id)))
-        beam_rad = (2.998e8 / current_freq) / dish_size
+        beam_rad = (2.998e8 / float(current_freq)) / dish_size
         return beam_rad
 
     def _publish_targets(self, targets, product_id, channel, columns=None,
@@ -776,6 +770,7 @@ class Listen(threading.Thread):
         publish(self.redis_server, channel, key)
         final_target = self.reformat_table(str(targ_dict))['\'source_id\''].iloc[-1].replace("\'", "").lstrip()
         total_targets = len(self.reformat_table(str(targ_dict))['\'source_id\''].index)
+
         logger.info('Targets published to {}'.format(channel))
         pStatus.proc_status = "processing"
         logger.info("Processing state set to 'processing\'")

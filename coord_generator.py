@@ -11,6 +11,7 @@ from random import seed
 from random import randint
 from random import choice
 
+
 with open('/Users/Bart/meerkat_target_selector/test/channels.txt', 'r') as f:
     channel = f.read()
     
@@ -95,6 +96,7 @@ with open('random_seed.csv') as f:
                 continue
             elif final_messages[i].endswith('False'):
                 if final_messages[i+4].endswith('True'):
+                    print(chnls[i], final_messages[i])
                     r.publish(chnls[i], final_messages[i])
                     print("Observing for 20 seconds...")
                     time.sleep(20)
@@ -102,6 +104,7 @@ with open('random_seed.csv') as f:
                 try:
                     key_glob = '*:*:targets'
                     for k in r.scan_iter(key_glob):
+                        time.sleep(15)
                         product_id = (str(k)[1:].replace("\'", "")).split(':')[0]
                         targets = str(r.get(k), 'utf-8')
                         w = targets.replace("\"", "")
@@ -117,20 +120,25 @@ with open('random_seed.csv') as f:
                         # print("\n",targetsFinal)
                         for s in targetsFinal['source_id']:
                             publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
-                        time.sleep(10)
+                            print('sensor alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
+                        time.sleep(15)
                         for s in targetsFinal['source_id']:
                             publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
+                            print('sensor alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
                 except TypeError:  # array_1:pointing_0:targets empty (NoneType)
                     pass
                 except Exception as k:
                     print(k)
                     pass
+                print(chnls[i], final_messages[i])
                 r.publish(chnls[i], final_messages[i])
                 time.sleep(0.05)
             elif final_messages[i].startswith('deconfigure'):
                 time.sleep(5)
+                print(chnls[i], final_messages[i])
                 r.publish(chnls[i], final_messages[i])
                 time.sleep(5)
             else:
+                print(chnls[i], final_messages[i])
                 r.publish(chnls[i], final_messages[i])
                 time.sleep(0.05)
