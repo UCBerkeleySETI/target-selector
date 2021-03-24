@@ -50,7 +50,6 @@ class ProcessingStatus(object):
 final_target = "0"
 total_targets = 0
 pStatus = ProcessingStatus("ready")
-proc_start_time = datetime.now()
 
 
 class Listen(threading.Thread):
@@ -136,17 +135,35 @@ class Listen(threading.Thread):
            messages that come through redis.
         """
 
-        # target_key = '*:target_selector:*'
-        # for m in self.redis_server.scan_iter(target_key):
-        #     delete_key(self.redis_server, m)
-
         for item in self.p.listen():
-            time_elapsed = (datetime.now() - proc_start_time).total_seconds()
+            product_id = "None"
+            logger.info("MESSAGE RECEIVED: {}".format(item['data']))
             self._message_to_func(item['channel'], self.channel_actions)(item['data'])
-            #     self.coord_error(item['data'])
+
+            if item['data'].startswith("array"):
+                product_id = item['data'].split(":")[0]
+            elif item['data'].split(":")[1].startswith("array"):
+                product_id = item['data'].split(":")[1]
+
+            if "None" not in str(get_redis_key(self.redis_server,
+                                               "{}:current_obs:proc_start_time".format(product_id))):
+                proc_start_time = get_redis_key(self.redis_server,
+                                                "{}:current_obs:proc_start_time".format(product_id))
+                time_elapsed = (datetime.now()
+                                - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
+                obs_start_time = get_redis_key(self.redis_server, "{}:current_obs:obs_start_time".format(product_id))
+                obs_end_time = get_redis_key(self.redis_server, "{}:current_obs:obs_end_time".format(product_id))
+                observation_time = (datetime.strptime(obs_end_time, "%Y-%m-%d %H:%M:%S.%f")
+                                    - datetime.strptime(obs_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
+
+                if (time_elapsed > 1200) and (time_elapsed > (2 * observation_time) - 300):
+                    logger.info("Processing time has exceeded both 20 and (2t_obs - 5) minutes. Aborting")
+                    self._deconfigure(product_id)
+                    pStatus.proc_status = "ready"
+                    logger.info("Processing state set to \'ready\'")
 
     def fetch_data(self, product_id):
-        """Runs continuously to fetch telescope status data and select targets if and when
+        """Fetches telescope status data and select targets if and when
            the status of the targets selector is ready & telescope status data is stored
         """
         if ("None" not in str(get_redis_key(self.redis_server, "{}:target_selector:coords"
@@ -494,8 +511,25 @@ class Listen(threading.Thread):
                                                                         "{}:current_obs:obs_start_time"
                                                                         .format(product_id)))), processed='TRUE')
 
-        if final_target in message:
+        target_list = pd.read_csv(StringIO(get_redis_key(self.redis_server, "{}:current_obs:target_list"
+                                                         .format(product_id))), sep=",", index_col=0)
+        number_to_process = len(target_list.index)
+        number_processed = target_list[target_list['source_id'] == float(source_id)].index.values[0]+1
+        fraction_processed = number_processed / number_to_process
+
+        proc_start_time = get_redis_key(self.redis_server, "{}:current_obs:proc_start_time".format(product_id))
+        time_elapsed = (datetime.now() - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
+
+        if number_processed == number_to_process:
             logger.info("Confirmation of successful processing of all sources received from processing nodes")
+            self._deconfigure(product_id)
+            pStatus.proc_status = "ready"
+            logger.info("Processing state set to \'ready\'")
+
+        elif (fraction_processed > 0.9) and (time_elapsed > 600):
+            logger.info("Processing time has exceeded 10 minutes, with >90% of targets processed successfully."
+                        " Aborting")
+            self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info("Processing state set to \'ready\'")
 
@@ -511,7 +545,6 @@ class Listen(threading.Thread):
             asdf:.....
                 ...
         """
-        global proc_start_time
 
         product_id = message.split(':')[0]
 
@@ -522,11 +555,11 @@ class Listen(threading.Thread):
             if self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
                 # all sources have been received by the processing nodes
                 # begin processing time
-                # pStatus.proc_status = "processing"
                 logger.info("Receipt of all targets confirmed by processing nodes")
-                # logger.info("Processing state set to \'processing\'")
                 proc_start_time = datetime.now()
-                # logger.info("pStatus.proc_status: {}".format(pStatus.proc_status))
+                write_pair_redis(self.redis_server,
+                                 "{}:current_obs:proc_start_time".format(product_id), str(proc_start_time))
+                publish(self.redis_server, "sensor_alerts", "{}:current_obs:proc_start_time".format(product_id))
 
 
 
