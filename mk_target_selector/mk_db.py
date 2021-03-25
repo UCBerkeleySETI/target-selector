@@ -129,20 +129,20 @@ class Triage(DatabaseHandler):
                 Datetime start time object of the observation
             end_time: (datetime)
                 Datetime end time object of the observation
-            proxies: (...)
-                ...
-            antennas: (...)
-                ...
-            n_antennas: (...)
-                ...
-            file_id: (...)
-                ...
-            bands: (...)
-                ...
-            mode: (...)
-                ...
-            table:
-                name of the observation metadata table
+            proxies: (str)
+                names of the proxies used for the observation
+            antennas: (str)
+                antennas used for the observation
+            n_antennas: (int)
+                number of antennas used for the observation
+            file_id: (str)
+                unique identifier for the file containing observation data ASDF
+            bands: (str)
+                frequency band of the observation
+            mode: (ASDF)
+                ASDF
+            table: (str)
+                name of the observation metadata table to add sources to
 
         Returns
             bool:
@@ -184,8 +184,8 @@ class Triage(DatabaseHandler):
                 Start time of observation
             processed: (bool)
                 Status of the observation that is to be updated
-            table: (...)
-                Table to be updated
+            table: (str)
+                Name of the table to be updated with processing success
 
         Returns:
             None
@@ -217,12 +217,10 @@ class Triage(DatabaseHandler):
                 Table within database where
             cols: (list)
                 Columns to select within the table
-            current_freq:.....
-                Current central frequency of observation
-            current_band:.....
-                Current frequency band of observation
+            current_freq: (str)
+                Current central frequency of observation in Hz
         Returns:
-            query: str
+            query: (str)
                 SQL query string
 
         """
@@ -270,11 +268,11 @@ class Triage(DatabaseHandler):
         Calculates the current frequency band of observation
 
         Parameters:
-            current_freq: (...)
-                ...
+            current_freq: (str)
+                Current central frequency of observation in Hz
         Returns:
-            current_band: (...)
-                ...
+            current_band: (str)
+                Current frequency band of observation
 
         """
 
@@ -298,12 +296,11 @@ class Triage(DatabaseHandler):
 
         Parameters:
             tb: (pandas.DataFrame)
-                table containing sources within the field of view of MeerKAT's
-                pointing
-            current_freq: (...)
-                Current frequency of observation
-            table: (...)
-                Table of previous observations to use for triaging
+                table containing sources within the field of view of MeerKAT's pointing
+            current_freq: (str)
+                Current central frequency of observation in Hz
+            table: (str)
+                Name of the MySQL table of previous observations to be used for triaging
 
         Returns:
             tb: (pandas.DataFrame)
@@ -364,30 +361,28 @@ class Triage(DatabaseHandler):
         tb['priority'] = priority
         return tb.sort_values('priority')
 
-    def select_targets(self, c_ra, c_dec, beam_rad, current_freq='Unknown', current_band='Unknown', table='target_list', cols=None):
+    def select_targets(self, c_ra, c_dec, beam_rad, current_freq='Unknown', table='target_list', cols=None):
         """Returns a string to query the 1 million star database to find sources
            within some primary beam area
 
         Parameters:
-            c_ra : float
+            c_ra : (float)
                 Pointing coordinates of the telescope in radians (right ascension)
-            c_dec : float
+            c_dec : (float)
                 Pointing coordinates of the telescope in radians (declination)
-            beam_rad: float
+            beam_rad: (float)
                 Angular radius of the primary beam in radians
-            current_freq: ......
-                Current frequency of observation
-            current_band: ......
-                Current frequency band of observation
-            table : str
-                Name of the table that is being queried
-            cols: ......
-                Columns of table
+            current_freq: (str)
+                Current central frequency of observation in Hz
+            table: (str)
+                Name of the MySQL table that is being queried
+            cols: (list)
+                Columns of table to output
 
         Returns:
-            target_list : DataFrame
+            target_list: (DataFrame)
                 Returns a pandas DataFrame containing the objects meeting the filter
-                criteria
+                criteria, sorted in order of priority
 
         """
 
@@ -412,60 +407,57 @@ class Triage(DatabaseHandler):
         # self.output_targets(target_list, c_ra, c_dec, current_freq)
         return target_list
 
-    def output_targets(self, target_list, c_ra, c_dec, current_freq='Unknown'):
-        """Function to plot selected targets & output the source list
-
-        Parameters:
-            target_list : DataFrame
-                A pandas DataFrame containing the objects meeting the filter
-                criteria
-            c_ra : float
-                Pointing coordinates of the telescope in radians (right ascension)
-            c_dec : float
-                Pointing coordinates of the telescope in radians (declination)
-            current_freq:.....
-                Current central frequency of observation
-            current_band:.....
-                Current frequency band of observation
-        Returns:
-            None
-        """
-
-        current_band = self._freqBand(current_freq)
-
-        # TESTING plot locations of target sources
-        ra_plot = coord.Angle(target_list['ra'] * u.degree)
-        ra_plot = ra_plot.wrap_at(180 * u.degree)
-        dec_plot = coord.Angle(target_list['decl'] * u.degree)
-        location_fig = plt.figure(figsize=(8, 6))
-        ax = location_fig.add_subplot(111, projection="mollweide")
-        ax.scatter(ra_plot.radian, dec_plot.radian, marker="+")
-        ax.grid(True)
-
-        location_fig.savefig("test_plot.pdf")
-        plt.close()
-        pointing_coord = coord.SkyCoord(ra=c_ra * u.rad, dec=c_dec * u.rad, frame='icrs')
-
-        logger.info('Plot of targets for pointing coordinates ({}, {}) at {} ({}) saved successfully'.format(
-            pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
-            pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True),
-            self.freq_format(current_freq), current_band))
-
-        print('\nTarget list for pointing coordinates ({}, {}) at {} ({}):\n {}\n'.format(
-            pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
-            pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), self.freq_format(current_freq),
-            current_band, target_list))
-        return target_list
+    # def output_targets(self, target_list, c_ra, c_dec, current_freq='Unknown'):
+    #     """Function to plot selected targets & output the source list
+    #
+    #     Parameters:
+    #         target_list: (DataFrame)
+    #             A pandas DataFrame containing the objects meeting the filter criteria
+    #         c_ra : float
+    #             Pointing coordinates of the telescope in radians (right ascension)
+    #         c_dec : float
+    #             Pointing coordinates of the telescope in radians (declination)
+    #         current_freq:.....
+    #             Current central frequency of observation in Hz
+    #     Returns:
+    #         None
+    #     """
+    #
+    #     current_band = self._freqBand(current_freq)
+    #
+    #     # TESTING plot locations of target sources
+    #     ra_plot = coord.Angle(target_list['ra'] * u.degree)
+    #     ra_plot = ra_plot.wrap_at(180 * u.degree)
+    #     dec_plot = coord.Angle(target_list['decl'] * u.degree)
+    #     location_fig = plt.figure(figsize=(8, 6))
+    #     ax = location_fig.add_subplot(111, projection="mollweide")
+    #     ax.scatter(ra_plot.radian, dec_plot.radian, marker="+")
+    #     ax.grid(True)
+    #
+    #     location_fig.savefig("test_plot.pdf")
+    #     plt.close()
+    #     pointing_coord = coord.SkyCoord(ra=c_ra * u.rad, dec=c_dec * u.rad, frame='icrs')
+    #
+    #     logger.info('Plot of targets for pointing coordinates ({}, {}) at {} ({}) saved successfully'.format(
+    #         pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
+    #         pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True),
+    #         self.freq_format(current_freq), current_band))
+    #
+    #     print('\nTarget list for pointing coordinates ({}, {}) at {} ({}):\n {}\n'.format(
+    #         pointing_coord.ra.wrap_at('180d').to_string(unit=u.hour, sep=':', pad=True),
+    #         pointing_coord.dec.to_string(unit=u.degree, sep=':', pad=True), self.freq_format(current_freq),
+    #         current_band, target_list))
+    #     return target_list
 
     def freq_format(self, current_freq):
         """Function to format current frequency to either MHz or GHz for output
 
         Parameters:
-            current_freq : asdf
-                asdf
+            current_freq: (str)
+                Current central frequency of observation in Hz
         Returns:
-            freq_formatted : asdf
-                asdf
+            freq_formatted: (str)
+                Formatted central frequency of observation, in either MHz or GHz
         """
 
         if float(current_freq) > 1000000000:
