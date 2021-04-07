@@ -19,7 +19,7 @@ git clone https://github.com/bart-s-wlodarczyk-sroka/meerkat_target_selector.git
 ```
 
 ```
-cd mk_target_selector
+cd meerkat_target_selector
 ```
 
 ```
@@ -44,7 +44,7 @@ This will prompt you for a password which you will need to enter.
 python target_selector_start.py
 ```
 
-MeerKAT status update messages are published on Redis over the `alerts` and `sensor_alerts` channels. The target selector subscribes to these channels, receiving messages in real-time and sending them to various functions to be acted upon depending on their contents. Relevant data (including the pointing coordinates, observation centre frequency and resource pool) is written to Redis key-value pairs. Upon commencement of observation, pointing coordinate and frequency data is retrieved and used to calculate a list of visible targets; these are queried from MySQL tables containing a sample of 26 million Gaia DR2 sources [2], in addition to smaller samples of exotica [3] and ad-hoc sources. The resulting list of visible targets is compared with another MySQL table containing metadata of previously completed observations, and ordered according to a chosen set of priority criteria. The final triaged list of targets is then sent to the processing nodes. Redis messages received from the backend concerning processing of submitted sources are in turn used to update the table of previous observations, until processing of all the published sources is either successful or aborted.
+MeerKAT status update messages are published to Redis over the `alerts` and `sensor_alerts` channels. The target selector subscribes to these channels, receiving messages in real-time and sending them to various functions to be acted upon depending on their contents. Relevant data (including the pointing coordinates, observation centre frequency and resource pool) is written to Redis key-value pairs. Upon commencement of observation, pointing coordinate and frequency data is retrieved and used to calculate a list of visible targets; these are queried from MySQL tables containing a sample of 26 million Gaia DR2 sources [2], in addition to smaller samples of exotica [3] and ad-hoc sources. The resulting list of visible targets is compared with another MySQL table containing metadata of previously completed observations, and ordered according to a chosen set of priority criteria. The final triaged list of targets is then sent to the processing nodes. Redis messages received from the backend concerning processing of submitted sources are in turn used to update the table of previous observations, until processing of all the published sources is either successful or aborted.
 
 ![](processing_state.png)
 

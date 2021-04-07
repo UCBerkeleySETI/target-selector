@@ -11,7 +11,9 @@ requires = [
 #    "credentials>=1.1",
     "python_dateutil>=2.8.0",
     "PyYAML>=5.1.2",
-    "mysqlclient>=1.4.4"
+    "mysqlclient>=1.4.4",
+    "logger>=1.4",
+    "matplotlib>=3.4.1"
 ]
 
 setuptools.setup(
