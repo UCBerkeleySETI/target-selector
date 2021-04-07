@@ -183,10 +183,10 @@ targets = self.engine.select_targets
                 np.deg2rad(coords_dec),
                 current_freq=self._get_sensor_value(product_id, "current_obs:frequency"),
                 beam_rad=self._beam_radius(self._get_sensor_value(product_id, "current_obs:frequency")))
-                [...]
-                targets_table = pd.DataFrame.to_csv(targets)
-                [...]
-                write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id), targets_table)
+[...]
+targets_table = pd.DataFrame.to_csv(targets)
+[...]
+write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id), targets_table)
 ```
 
 The current timestamp is written to the Redis key `product_id:current_obs:obs_start_time` (indicating the observation start time), the target list is published to `bluse:///set`, and the target selector state is set to `processing`. 
