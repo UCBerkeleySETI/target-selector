@@ -43,6 +43,20 @@ This will prompt you for a password which you will need to enter.
 ```
 python target_selector_start.py
 ```
+```
+                      __  __                _  __    _  _____
+                     |  \/  | ___  ___ _ __| |/ /   / \|_   _|
+                     | |\/| |/ _ \/ _ \ '__| ' /   / _ \ | |
+                     | |  | |  __/  __/ |  | . \  / ___ \| |
+                     |_|  |_|\___|\___|_|  |_|\_\/_/   \_\_|
+
+          _____                    _     ____       _           _
+         |_   _|_ _ _ __ __ _  ___| |_  / ___|  ___| | ___  ___| |_ ___  _ __
+           | |/ _` | '__/ _` |/ _ \ __| \___ \ / _ \ |/ _ \/ __| __/ _ \| '__|
+           | | (_| | | | (_| |  __/ |_   ___) |  __/ |  __/ (__| || (_) | |
+           |_|\__,_|_|  \__, |\___|\__| |____/ \___|_|\___|\___|\__\___/|_|
+                        |___/
+```
 
 MeerKAT status update messages are published on Redis over the `alerts` and `sensor_alerts` channels. The target selector subscribes to these channels, receiving messages in real-time and sending them to various functions to be acted upon depending on their contents. Relevant data (including the pointing coordinates, observation centre frequency and resource pool) is written to Redis key-value pairs. Upon commencement of observation, pointing coordinate and frequency data is retrieved and used to calculate a list of visible targets; these are queried from MySQL tables containing a sample of 26 million Gaia DR2 sources [2], in addition to smaller samples of exotica [3] and ad-hoc sources. The resulting list of visible targets is compared with another MySQL table containing metadata of previously completed observations, and ordered according to a chosen set of priority criteria. The final triaged list of targets is then sent to the processing nodes. Redis messages received from the backend concerning processing of submitted sources are in turn used to update the table of previous observations, until processing of all the published sources is either successful or aborted.
 
@@ -114,6 +128,9 @@ def _pool_resources(self, message):
 Upon receipt of a `capture-start` message (if the target selector is in the `ready` state) the data stored under the `product_id:target_selector:coords`, `product_id:target_selector:frequency` and `product_id:target_selector:pool_resources` Redis keys is retrieved and written to other Redis keys specific to the current observation (`product_id:current_obs:coords`, `product_id:current_obs:frequency` and `product_id:current_obs:pool_resources`).
 
 ```
+[2021-04-07 13:13:40,383 - INFO - mk_redis.py:280] Capture start message received: array_1
+```
+```
 def _capture_start(self, message):
     [...]
     def fetch_data(self, product_id):
@@ -126,16 +143,13 @@ def _capture_start(self, message):
         write_pair_redis(self.redis_server, "{}:current_obs:frequency".format(product_id), new_freq)
         write_pair_redis(self.redis_server, "{}:current_obs:pool_resources".format(product_id), new_pool)
 ```
-```
-[2021-04-07 13:13:40,383 - INFO - mk_redis.py:280] Capture start message received: array_1
-[2021-04-07 13:13:40,384 - INFO - mk_redis.py:182] Fetched array_1:current_obs:coords: 51.76745833333333, -33.92397222222222
-[2021-04-07 13:13:40,385 - INFO - mk_redis.py:186] Fetched array_1:current_obs:frequency: 10000000000
-[2021-04-07 13:13:40,385 - INFO - mk_redis.py:190] Fetched array_1:current_obs:pool_resources: bluse_1,cbf_1,fbfuse_1,m000,m001
-```
 
 MeerKAT's field of view is calculated from its pointing coordinates and observation frequency, and MySQL tables containing the 26m, ad-hoc and exotica samples are queried for sources contained within.
 
 ```
+[2021-04-07 13:13:40,384 - INFO - mk_redis.py:182] Fetched array_1:current_obs:coords: 51.76745833333333, -33.92397222222222
+[2021-04-07 13:13:40,385 - INFO - mk_redis.py:186] Fetched array_1:current_obs:frequency: 10000000000
+[2021-04-07 13:13:40,385 - INFO - mk_redis.py:190] Fetched array_1:current_obs:pool_resources: bluse_1,cbf_1,fbfuse_1,m000,m001
 [2021-04-07 13:13:40,386 - INFO - mk_db.py:229] Beam radius at 10.0 GHz (X band): 0.0022207407407407406 radians = 7.634344310232036 arc minutes
 [2021-04-07 13:13:40,386 - INFO - mk_db.py:401] Query:
  
@@ -165,6 +179,16 @@ Sources marked as 'exotica' are assigned a priority of 3; all sources are then c
 The current timestamp is written to the Redis key `product_id:current_obs:obs_start_time` (indicating the observation start time), the target list is published to `bluse:///set`, and the target selector state is set to `processing`. 
 
 ```
+    pulled_targets = StringIO(self._get_sensor_value(product_id, "current_obs:target_list"))
+    pulled_coords = self._get_sensor_value(product_id, "current_obs:coords")
+    pulled_freq = self.engine.freq_format(self._get_sensor_value(product_id, "current_obs:frequency"))
+    targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
+    [...]
+    obs_start_time = datetime.now()
+    write_pair_redis(self.redis_server, "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
+    [...]
+    self._publish_targets(targets_to_publish, product_id, sub_arr_id)
+
 def _publish_targets(self, targets, product_id, channel, columns, sub_arr_id, sensor_name='targets'):
     [...]
     write_pair_redis(self.redis_server, key, json.dumps(targ_dict))
