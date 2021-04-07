@@ -79,7 +79,7 @@ def _target_query(self, message):
 
 #### `sensor_alerts` -> `product_id:[...]_channelised_voltage_centre_frequency`
 
-These messages contain the centre frequency in Hz of the current observation (for example, `816000000`) for a given sub-array. Upon receipt of such a message, a string containing the parsed frequency is written to the Redis key `product_id:target_selector:frequency`.
+These messages contain the centre frequency in Hz of the current observation (for example, `10000000000`) for a given sub-array. Upon receipt of such a message, a string containing the parsed frequency is written to the Redis key `product_id:target_selector:frequency`.
 
 ```
 def _frequency(self, message):
@@ -133,7 +133,7 @@ def _capture_start(self, message):
 [2021-04-07 13:13:40,385 - INFO - mk_redis.py:190] Fetched array_1:current_obs:pool_resources: bluse_1,cbf_1,fbfuse_1,m000,m001
 ```
 
-MeerKAT's field of view is calculated from its pointing coordinates and observation frequency, and MySQL tables containing the 26m, ad-hoc and exotica samples are queried for sources matching the criteria.
+MeerKAT's field of view is calculated from its pointing coordinates and observation frequency, and MySQL tables containing the 26m, ad-hoc and exotica samples are queried for sources contained within.
 
 ```
 [2021-04-07 13:13:40,386 - INFO - mk_db.py:229] Beam radius at 10.0 GHz (X band): 0.0022207407407407406 radians = 7.634344310232036 arc minutes
@@ -158,7 +158,7 @@ MeerKAT's field of view is calculated from its pointing coordinates and observat
 
 Resulting sources are subsequently triaged according to set criteria. Sources are given a priority value (where a lower value indicates a higher importance), with all sources initially assigned a priority of 2.
 
-Sources marked as `exotica` are assigned a priority of 3; all sources are then compared against the table of previous observations. If a source has been previously observed, it is assigned a priority of 6. If a source has been previously observed, but at a different frequency band, it is assigned a priority of 5, and if a source has been previously observed, but either with less than 58 antennas or for a total of less than 5 minutes, it is assigned a priority of 4. Finally, sources marked as `ad-hoc` are assigned a priority of 1. The list of targets is then sorted in order of increasing priority and distance, parsed as a string and written to the Redis key `product_id:current_obs:target_list`.
+Sources marked as 'exotica' are assigned a priority of 3; all sources are then compared against the table of previous observations. If a source has been previously observed, it is assigned a priority of 6. If a source has been previously observed, but at a different frequency band, it is assigned a priority of 5, and if a source has been previously observed, but either with less than 58 antennas or for a total of less than 5 minutes, it is assigned a priority of 4. Finally, sources marked as 'ad-hoc' are assigned a priority of 1. The list of targets is then sorted in order of increasing priority and distance, parsed as a string and written to the Redis key `product_id:current_obs:target_list`.
 
 ![](triage_overview.png)
 
