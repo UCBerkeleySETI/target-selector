@@ -135,7 +135,6 @@ class Listen(threading.Thread):
         """
 
         for item in self.p.listen():
-            # logger.info("MESSAGE RECEIVED: {}".format(item['data']))
             self._message_to_func(item['channel'], self.channel_actions)(item['data'])
 
             product_id = self._parse_sensor_name(item['data'])[0]
@@ -309,7 +308,9 @@ class Listen(threading.Thread):
         logger.info("Capture stop message received: {}".format(message))
         product_id = message.split(":")[-1]
 
-        if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
+        # LATEST CHANGES BELOW: won't need after we have tracking messages
+        if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")) \
+                and "None" in str(self._get_sensor_value(product_id, "current_obs:obs_end_time")):  # HERE
             try:
                 obs_end_time = datetime.now()
                 write_pair_redis(self.redis_server, "{}:current_obs:obs_end_time".format(product_id), str(obs_end_time))
@@ -432,11 +433,11 @@ class Listen(threading.Thread):
         logger.info("Pool resources message received: {}".format(message))
 
         product_id, _ = message.split(':')
-        value = get_redis_key(self.redis_server, message)
+        pool_resources_value = get_redis_key(self.redis_server, message)
 
         pool_resources_key = "{}:target_selector:pool_resources".format(product_id)
-        write_pair_redis(self.redis_server, pool_resources_key, value)
-        logger.info("Wrote [{}] to [{}]".format(value, pool_resources_key))
+        write_pair_redis(self.redis_server, pool_resources_key, pool_resources_value)
+        logger.info("Wrote [{}] to [{}]".format(pool_resources_value, pool_resources_key))
 
     def _frequency(self, message):
         """Response to a frequency message from the sensor_alerts channel.
@@ -452,11 +453,11 @@ class Listen(threading.Thread):
         logger.info("Frequency message received: {}".format(message))
 
         product_id, sensor_name = message.split(':')
-        value = get_redis_key(self.redis_server, message)
+        frequency_value = get_redis_key(self.redis_server, message)
 
         frequency_key = "{}:target_selector:frequency".format(product_id)
-        write_pair_redis(self.redis_server, frequency_key, value)
-        logger.info("Wrote [{}] to [{}]".format(value, frequency_key))
+        write_pair_redis(self.redis_server, frequency_key, frequency_value)
+        logger.info("Wrote [{}] to [{}]".format(frequency_value, frequency_key))
 
     def _processing_success(self, message):
         """Response to a successful processing success message from the sensor_alerts channel.
@@ -475,10 +476,9 @@ class Listen(threading.Thread):
 
         # update observation_status with success message
         self.engine.update_obs_status(source_id,
-                                      obs_start_time=str(self
-                                                         .round_time
-                                                         (self._get_sensor_value(product_id,
-                                                                                 "current_obs:obs_start_time"))),
+                                      obs_start_time=str(self.round_time
+                                                         (self._get_sensor_value
+                                                          (product_id, "current_obs:obs_start_time"))),
                                       processed='TRUE')
 
         target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
@@ -520,7 +520,8 @@ class Listen(threading.Thread):
         key_glob = ('{}:*:{}'.format(product_id, 'targets'))
         for k in self.redis_server.scan_iter(key_glob):
             q = get_redis_key(self.redis_server, k)
-            if self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
+            if get_redis_key(self.redis_server, "{}:current_obs:proc_start_time".format(product_id)) is None\
+                    and self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
                 # all sources have been received by the processing nodes
                 # begin processing time
                 logger.info("Receipt of all targets confirmed by processing nodes")
