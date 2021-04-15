@@ -1,6 +1,6 @@
 # meerkat-target-selector
 
-One of Breakthrough Listen’s primary objectives is to conduct the most comprehensive radio-frequency search for evidence of intelligent life thus far, observing 1 million nearby stars and other objects [1]. [MeerKAT](https://www.ska.ac.za/gallery/meerkat/), the SKA precursor in South Africa inaugurated in 2018, is one of several instruments crucial to attaining this goal. The data from the array may be tapped off at different processing stages by many users simultaneously through subscription to data streams. This architecture provides a rare opportunity for commensal SETI observing on an array telescope. The Breakthrough Listen program on MeerKAT will be primarily commensal, and the first 16 of an eventual 128 servers have already been installed in the on-site data center at the telescope. This project will address an important component of Breakthrough Listen’s program on MeerKAT - identifying the set of targets that can be observed through commensal beamforming during particular primary science observations.
+One of Breakthrough Listen’s primary objectives is to conduct the most comprehensive radio-frequency search for evidence of intelligent life thus far, observing 1 million nearby stars and other objects [1]. [MeerKAT](https://www.ska.ac.za/gallery/meerkat/), the SKA precursor in South Africa inaugurated in 2018, is one of several instruments crucial to attaining this goal. The data from the array may be tapped off at different processing stages by many users simultaneously through subscription to data streams. This architecture provides a rare opportunity for commensal SETI observing on an array telescope. The Breakthrough Listen program on MeerKAT will be primarily commensal, and 64+ of an eventual 128 servers have already been installed in the on-site data center at the telescope. This project will address an important component of Breakthrough Listen’s program on MeerKAT - identifying the set of targets that can be observed through commensal beamforming during particular primary science observations.
 
 ![](diagram.png)
 
@@ -10,7 +10,7 @@ One of Breakthrough Listen’s primary objectives is to conduct the most compreh
 
 ### Redis
 
-There are likely many ways to do this, but the simplest way to install Redis is the follow this [link](https://redis.io/topics/quickstart) to their homepage and follow their instructions for your particular distribution.
+There are likely many ways to do this, but the simplest way to install Redis is to follow this [link](https://redis.io/topics/quickstart) to their homepage and follow their instructions for your particular distribution.
 
 ### Target Selector
 
@@ -28,9 +28,9 @@ python setup.py install
 
 ### MySQL database
 
-[MySQL Server](https://dev.mysql.com/downloads/mysql/)
+To install MySQL Server, follow this [link](https://dev.mysql.com/downloads/mysql/) and follow the instructions for your particular distribution.
 
-Setup the database:
+To set up the database:
 
 ```
 python scripts/configure_db.py -u your_username
@@ -359,8 +359,8 @@ These store the metadata for the currently processing block, and are not changed
 * `product_id:current_obs:coords`, i.e. `74.79179, 43.0175`
 * `product_id:current_obs:pool_resources`, i.e. `bluse_1,cbf_1,fbfuse_1,m000,m001`
 * `product_id:current_obs:frequency`, i.e. `10000000000`
-* `product_id:current_obs:obs_start_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. Currently this is used to calculate t_obs, as well as in addition to the source_id to identify which sources from the previously observed table to update upon receipt of successful processing messages. The first use case will be obsolete/unnecessary once we have or simulate t_obs messages from the processing nodes.
-* `product_id:current_obs:obs_end_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. This is only used to calculate t_obs, and will thus be unnecessary as above.
+* `product_id:current_obs:obs_start_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. Currently this is used to calculate t<sub>obs</sub>, as well as in addition to the source_id to identify which sources from the previously observed table to update upon receipt of successful processing messages. The first use case will be obsolete/unnecessary once we have or simulate t<sub>obs</sub> messages from the processing nodes.
+* `product_id:current_obs:obs_end_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. This is only used to calculate t<sub>obs</sub>, and will thus be unnecessary as above.
 * `product_id:current_obs:proc_start_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. Set at the moment the processing nodes confirm receipt of the last target in the published block, and used to calculate processing duration for the abort criteria.
 * `product_id:current_obs:target_list`, dataframe containing targets in the currently processing block , parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../123456789,A,B,C,.../[...]`
 

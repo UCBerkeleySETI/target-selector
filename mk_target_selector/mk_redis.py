@@ -166,8 +166,7 @@ class Listen(threading.Thread):
         """
         if ("None" not in str(self._get_sensor_value(product_id, "target_selector:coords")))\
                 and ("None" not in str(self._get_sensor_value(product_id, "target_selector:frequency")))\
-                and ("None" not in str(self._get_sensor_value(product_id, "target_selector:pool_resources")))\
-                and (pStatus.proc_status == "ready"):
+                and ("None" not in str(self._get_sensor_value(product_id, "target_selector:pool_resources"))):
             try:
                 # create redis key-val pairs to store current observation data & current telescope status data
 
@@ -279,22 +278,23 @@ class Listen(threading.Thread):
         logger.info("Capture start message received: {}".format(message))
         product_id = message.split(":")[-1]
 
-        self.fetch_data(product_id)
+        if pStatus.proc_status == "ready":
+            self.fetch_data(product_id)
+            if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
+                sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
+                pulled_targets = StringIO(self._get_sensor_value(product_id, "current_obs:target_list"))
+                pulled_coords = self._get_sensor_value(product_id, "current_obs:coords")
+                pulled_freq = self.engine.freq_format(self._get_sensor_value(product_id, "current_obs:frequency"))
 
-        if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
-            sub_arr_id = "0"
-            pulled_targets = StringIO(self._get_sensor_value(product_id, "current_obs:target_list"))
-            pulled_coords = self._get_sensor_value(product_id, "current_obs:coords")
-            pulled_freq = self.engine.freq_format(self._get_sensor_value(product_id, "current_obs:frequency"))
+                targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
+                logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
+                                                                              pulled_freq, targets_to_publish))
 
-            targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
-            logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
-                                                                          pulled_freq, targets_to_publish))
+                obs_start_time = datetime.now()
+                write_pair_redis(self.redis_server,
+                                 "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
-            obs_start_time = datetime.now()
-            write_pair_redis(self.redis_server, "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
-
-            self._publish_targets(targets_to_publish, product_id, sub_arr_id)
+                self._publish_targets(targets_to_publish, product_id, sub_arr_id)
 
     def _capture_stop(self, message):
         """Function that responds to capture stop updates. Takes observing end time and stores metadata
