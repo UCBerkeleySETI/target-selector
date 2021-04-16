@@ -1,6 +1,6 @@
-import matplotlib.pyplot as plt  # for location plot
-import astropy.coordinates as coord  # for location plot
-import astropy.units as u  # for location plot
+# import matplotlib.pyplot as plt  # for location plot
+# import astropy.coordinates as coord  # for location plot
+# import astropy.units as u  # for location plot
 from dateutil import parser
 from datetime import datetime
 from sqlalchemy import create_engine
@@ -9,9 +9,9 @@ import yaml
 import math
 import numpy as np
 import pandas as pd
-import matplotlib  # for location plot
+# import matplotlib  # for location plot
 
-matplotlib.use('Agg')  # for location plot
+# matplotlib.use('Agg')  # for location plot
 
 try:
     from .logger import log as logger
