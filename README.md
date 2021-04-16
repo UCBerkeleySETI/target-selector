@@ -36,7 +36,7 @@ To set up the database:
 python scripts/configure_db.py -u your_username
 ```
 
-This will prompt you for a password which you will need to enter.
+This will prompt you for a password which you will need to enter. This downloads the relevant data tables containing the 26m source sample as well as the ad-hoc and exotica samples to a MySQL database, and need only be done once prior to running the target selector.
 
 ## Usage
 
