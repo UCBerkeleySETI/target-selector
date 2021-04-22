@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 
 '''
-
 This script is pretty slow for creating the database. Will work on adding support
 for bulk inserting data from csv file in the future.
-
 '''
 
 import os
@@ -40,7 +38,7 @@ class Observation(Base):
     """
     __tablename__ = 'observation_status'
     rowid = Column(INT, primary_key = True)
-    source_id = Column(VARCHAR(45))
+    source_id = Column(BIGINT)
     antennas = Column(Text)
     n_antennas = Column(INT)
     proxies = Column(Text)
@@ -100,8 +98,8 @@ def main(user, password, host, schema_name):
     obs_table_name = 'observation_status'
     adhoc_table_name = 'adhoc_list'
     exotica_table_name = 'exotica_list'
-    url = URL.create(**cred)
-    engine = create_engine(url)
+    url = URL(**cred)
+    engine = create_engine(name_or_url = url)
     engine.execute('CREATE DATABASE IF NOT EXISTS {};'.format(schema_name))
     engine.execute('USE {};'.format(schema_name))
 
