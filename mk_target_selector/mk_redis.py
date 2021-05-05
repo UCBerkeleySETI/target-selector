@@ -147,11 +147,7 @@ class Listen(threading.Thread):
                 observation_time = (datetime.strptime(obs_end_time, "%Y-%m-%d %H:%M:%S.%f")
                                     - datetime.strptime(obs_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
 
-                if (time_elapsed > 1200) and (time_elapsed > (2 * observation_time) - 300):
-                    logger.info("Processing time has exceeded both 20 and (2t_obs - 5) minutes. Aborting")
-                    self._deconfigure(product_id)
-                    pStatus.proc_status = "ready"
-                    logger.info("Processing state set to \'ready\'")
+                self.abort_criteria(product_id, time_elapsed, observation_time)
 
     def fetch_data(self, product_id):
         """Fetches telescope status data and select targets if and when
@@ -496,12 +492,7 @@ class Listen(threading.Thread):
             pStatus.proc_status = "ready"
             logger.info("Processing state set to \'ready\'")
 
-        elif (fraction_processed > 0.9) and (time_elapsed > 600):
-            logger.info("Processing time has exceeded 10 minutes, with >90% of targets processed successfully."
-                        " Aborting")
-            self._deconfigure(product_id)
-            pStatus.proc_status = "ready"
-            logger.info("Processing state set to \'ready\'")
+        self.abort_criteria(product_id, time_elapsed, fraction_processed)
 
     def _acknowledge(self, message):
         """Response to a successful acknowledgement message from the sensor_alerts channel.
@@ -534,6 +525,37 @@ class Listen(threading.Thread):
     Internal Methods
 
     """
+
+    def abort_criteria(self, product_id, time_elapsed, observation_time=None, fraction_processed=None):
+        """Function to abort processing if certain conditions are met
+
+        Parameters:
+            product_id: (str)
+                Subarray ID received from redis message
+            time_elapsed: (str)
+                Total time elapsed since start of processing
+            observation_time: (str)
+                Total recorded observation time from the processing nodes (t_obs)
+            fraction_processed: (str)
+                Fraction of sources successfully processed from the currently processing block
+
+        Returns:
+            None
+        """
+        if not fraction_processed:  # processing aborted based on observation time (t_obs)
+            if (time_elapsed > 1200) and (time_elapsed > (2 * observation_time) - 300):
+                logger.info("Processing time has exceeded both 20 and (2t_obs - 5) minutes. Aborting")
+                self._deconfigure(product_id)
+                pStatus.proc_status = "ready"
+                logger.info("Processing state set to \'ready\'")
+
+        elif not observation_time:  # processing aborted based on absolute processing time
+            if (fraction_processed > 0.9) and (time_elapsed > 600):
+                logger.info("Processing time has exceeded 10 minutes, with >90% of targets processed successfully."
+                            " Aborting")
+                self._deconfigure(product_id)
+                pStatus.proc_status = "ready"
+                logger.info("Processing state set to \'ready\'")
 
     def reformat_table(self, table):
         """Function to reformat the table of targets pushed to the backend
