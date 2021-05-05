@@ -149,7 +149,7 @@ class Listen(threading.Thread):
 
                 self.abort_criteria(product_id, time_elapsed, observation_time)
 
-    def fetch_data(self, product_id):
+    def fetch_data(self, product_id, mode):
         """Fetches telescope status data and select targets if and when
            the status of the targets selector is ready & telescope status data is stored
 
@@ -165,39 +165,37 @@ class Listen(threading.Thread):
                 and ("None" not in str(self._get_sensor_value(product_id, "target_selector:pool_resources"))):
             try:
                 # create redis key-val pairs to store current observation data & current telescope status data
-
                 new_coords = self._get_sensor_value(product_id, "target_selector:coords")
                 coords_ra = float(new_coords.split(", ")[0])
                 coords_dec = float(new_coords.split(", ")[1])
                 new_freq = self._get_sensor_value(product_id, "target_selector:frequency")
                 new_pool = self._get_sensor_value(product_id, "target_selector:pool_resources")
 
-                write_pair_redis(self.redis_server, "{}:current_obs:coords".format(product_id), new_coords)
-                logger.info("Fetched {}:current_obs:coords: {}"
-                            .format(product_id, self._get_sensor_value(product_id, "current_obs:coords")))
-
-                write_pair_redis(self.redis_server, "{}:current_obs:frequency".format(product_id), new_freq)
-                logger.info("Fetched {}:current_obs:frequency: {}"
-                            .format(product_id, self._get_sensor_value(product_id, "current_obs:frequency")))
-
-                write_pair_redis(self.redis_server, "{}:current_obs:pool_resources".format(product_id), new_pool)
-                logger.info("Fetched {}:current_obs:pool_resources: {}"
-                            .format(product_id, self._get_sensor_value(product_id, "current_obs:pool_resources")))
+                if mode == "current_obs":
+                    write_pair_redis(self.redis_server, "{}:{}:coords".format(product_id, mode), new_coords)
+                    logger.info("Fetched {}:{}:coords: {}"
+                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:coords".format(mode))))
+                    write_pair_redis(self.redis_server, "{}:{}:frequency".format(product_id, mode), new_freq)
+                    logger.info("Fetched {}:{}:frequency: {}"
+                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:frequency".format(mode))))
+                    write_pair_redis(self.redis_server, "{}:{}:pool_resources".format(product_id, mode), new_pool)
+                    logger.info("Fetched {}:{}:pool_resources: {}"
+                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources".format(mode))))
 
                 targets = self\
                     .engine.select_targets(np.deg2rad(coords_ra),
                                            np.deg2rad(coords_dec),
-                                           current_freq=self._get_sensor_value(product_id, "current_obs:frequency"),
+                                           current_freq=self._get_sensor_value(product_id, "{}:frequency".format(mode)),
                                            beam_rad=self._beam_radius(self._get_sensor_value(product_id,
-                                                                                             "current_obs:frequency")))
+                                                                                             "{}:frequency".format(mode))))
 
                 targets_table = pd.DataFrame.to_csv(targets)
 
                 if len(targets.index) == 0:
-                    self.coord_error(coords=self._get_sensor_value(product_id, "current_obs:coords"),
-                                     frequency=self._get_sensor_value(product_id, "current_obs:frequency"))
+                    self.coord_error(coords=self._get_sensor_value(product_id, "{}:coords".format(mode)),
+                                     frequency=self._get_sensor_value(product_id, "{}:frequency".format(mode)))
                 else:
-                    write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id), targets_table)
+                    write_pair_redis(self.redis_server, "{}:{}:target_list".format(product_id, mode), targets_table)
 
             except KeyError:
                 pass
@@ -275,7 +273,7 @@ class Listen(threading.Thread):
         product_id = message.split(":")[-1]
 
         if pStatus.proc_status == "ready":
-            self.fetch_data(product_id)
+            self.fetch_data(product_id, mode="current_obs")
             if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
                 sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
                 pulled_targets = StringIO(self._get_sensor_value(product_id, "current_obs:target_list"))
@@ -291,6 +289,45 @@ class Listen(threading.Thread):
                                  "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
                 self._publish_targets(targets_to_publish, product_id, sub_arr_id)
+
+        elif pStatus.proc_status == "processing":
+            self.fetch_data(product_id, mode="target_selector")
+            if "None" not in str(self._get_sensor_value(product_id, "target_selector:target_list")):
+
+                #  stars in the 26m sample: d_hi(1m) = 175 pc, d_median = 771 pc
+                limiting_distance = 175
+                limiting_fraction = 0.2
+
+                new_target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
+                                                                              "target_selector:target_list")), sep=",",
+                                              index_col=0)
+
+                remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
+                                                                                   "current_obs:remaining_to_process")),
+                                                   sep=",", index_col=0)
+
+                n_remaining = (len(remaining_to_process.loc[remaining_to_process['dist_c'] <= limiting_distance].index))
+                n_new_list = (len(new_target_list.loc[new_target_list['dist_c'] <= limiting_distance].index))
+
+                if n_remaining/n_new_list < limiting_fraction:
+                    self.abort_criteria(product_id, limiting_distance, limiting_fraction, n_remaining, n_new_list)
+                    self.fetch_data(product_id, mode="current_obs")
+                    if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
+                        sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
+                        pulled_targets = StringIO(self._get_sensor_value(product_id, "current_obs:target_list"))
+                        pulled_coords = self._get_sensor_value(product_id, "current_obs:coords")
+                        pulled_freq = self.engine.freq_format(
+                            self._get_sensor_value(product_id, "current_obs:frequency"))
+
+                        targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
+                        logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
+                                                                                      pulled_freq, targets_to_publish))
+
+                        obs_start_time = datetime.now()
+                        write_pair_redis(self.redis_server,
+                                         "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
+
+                        self._publish_targets(targets_to_publish, product_id, sub_arr_id)
 
     def _capture_stop(self, message):
         """Function that responds to capture stop updates. Takes observing end time and stores metadata
@@ -483,6 +520,12 @@ class Listen(threading.Thread):
         number_processed = target_list[target_list['source_id'] == float(source_id)].index.values[0]+1
         fraction_processed = number_processed / number_to_process
 
+        remaining_to_process = pd.DataFrame.to_csv(target_list.drop(
+            target_list[target_list.index < number_processed - 1].index))
+
+        write_pair_redis(self.redis_server,
+                         "{}:current_obs:remaining_to_process".format(product_id), remaining_to_process)
+
         proc_start_time = self._get_sensor_value(product_id, "current_obs:proc_start_time")
         time_elapsed = (datetime.now() - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
 
@@ -526,7 +569,8 @@ class Listen(threading.Thread):
 
     """
 
-    def abort_criteria(self, product_id, time_elapsed, observation_time=None, fraction_processed=None):
+    def abort_criteria(self, product_id, time_elapsed=None, observation_time=None, fraction_processed=None,
+                       limiting_distance=None, limiting_fraction=None, n_remaining=None, n_new_list=None):
         """Function to abort processing if certain conditions are met
 
         Parameters:
@@ -538,13 +582,33 @@ class Listen(threading.Thread):
                 Total recorded observation time from the processing nodes (t_obs)
             fraction_processed: (str)
                 Fraction of sources successfully processed from the currently processing block
+            limiting_distance: (str)
+                Distance to use when aborting processing based on amount of sources within the next pointing compared
+                with those remaining to be processed from the current pointing
+            limiting_fraction: (str)
+                Fraction to use when aborting processing based on amount of sources within the next pointing compared
+                with those remaining to be processed from the current pointing
+            n_remaining: (str)
+                Number of sources remaining to be processed in the current block within limiting_distance
+            n_new_list: (str)
+                Number of sources in the new target list within limiting_distance
 
         Returns:
             None
         """
-        if not fraction_processed:  # processing aborted based on observation time (t_obs)
+        if (not fraction_processed) and (not observation_time):
+            # processing aborted based on greater number of sources within a given distance in the new pointing compared
+            # with the remaining unprocessed sources
+            logger.info("{} sources within {} pc left to process".format(n_remaining, limiting_distance))
+            logger.info("{} sources within {} pc contained in new pointing".format(n_new_list, limiting_distance))
+            logger.info("Limiting fraction of {} exceeded. Aborting processing".format(limiting_fraction))
+            self._deconfigure(product_id)
+            pStatus.proc_status = "ready"
+            logger.info("Processing state set to \'ready\'")
+
+        elif not fraction_processed:  # processing aborted based on observation time (t_obs)
             if (time_elapsed > 1200) and (time_elapsed > (2 * observation_time) - 300):
-                logger.info("Processing time has exceeded both 20 and (2t_obs - 5) minutes. Aborting")
+                logger.info("Processing time has exceeded both 20 and (2t_obs - 5) minutes. Aborting processing")
                 self._deconfigure(product_id)
                 pStatus.proc_status = "ready"
                 logger.info("Processing state set to \'ready\'")
@@ -552,7 +616,7 @@ class Listen(threading.Thread):
         elif not observation_time:  # processing aborted based on absolute processing time
             if (fraction_processed > 0.9) and (time_elapsed > 600):
                 logger.info("Processing time has exceeded 10 minutes, with >90% of targets processed successfully."
-                            " Aborting")
+                            " Aborting processing")
                 self._deconfigure(product_id)
                 pStatus.proc_status = "ready"
                 logger.info("Processing state set to \'ready\'")
