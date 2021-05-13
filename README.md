@@ -248,16 +248,19 @@ def _publish_targets(self, targets, product_id, channel, columns, sub_arr_id, se
 
 While the target selector is in the `processing` state, the `[...]:new_obs:[...]` Redis keys are continually updated with incoming status messages, while the `[...]:current_obs:[...]` Redis keys remain the same until confirmation is received from the processing nodes that processing of the current block has either been aborted or concluded successfully.
 
-If a `capture-start` message is received while the previously published target list is still being processed by the backed (and consequently the target selector is in the `processing` state), the function calculates a target list from the data contained under the `product_id:new_obs:*` Redis keys, without overwriting the `product_id:current_obs:*` keys. The target list for the new pointing is then compared with the remaining unprocessed sources from the current sample. If the new pointing contains a greater number of sources, with a lower median distance, than the remaining unprocessed sources from the current sample, processing is aborted and the new target list is published and sent to the processing nodes.
+If a `capture-start` message is received while the previously published target list is still being processed by the back-end (and consequently the target selector is in the `processing` state), the function calculates a target list from the data contained under the `product_id:new_obs:*` Redis keys, without overwriting the `product_id:current_obs:*` keys. The target list for the new pointing is then compared with the remaining unprocessed sources from the current sample. If the new pointing contains a greater total number of sources (`n_remaining < n_new_list`) with a lower median distance (`r_med_new_list < r_med_remaining`) than the remaining unprocessed sources from the current sample, processing is aborted and the new target list is published and sent to the processing nodes.
 
 ```
 def _capture_start(self, message):
     [...]
-    if pStatus.proc_status == "ready":
+    if pStatus.proc_status == "processing":
         self.fetch_data(product_id, mode="new_obs")
         [...]
             if (n_remaining < n_new_list) and (r_med_new_list < r_med_remaining):
                 self.abort_criteria(product_id, n_remaining, n_new_list, r_med_remaining, r_med_new_list)
+                self.fetch_data(product_id, mode="current_obs")
+                [...]
+                self._publish_targets(targets_to_publish, product_id, sub_arr_id)
 ```
 
 #### `alerts` -> `capture-stop:product_id`
@@ -368,6 +371,7 @@ These keys store the current, up-to-date telescope status and are continually up
 * `product_id:new_obs:coords`, i.e. `74.79179, 43.0175`
 * `product_id:new_obs:pool_resources`, i.e. `bluse_1,cbf_1,fbfuse_1,m000,m001`
 * `product_id:new_obs:frequency`, i.e. `10000000000`
+* `product_id:new_obs:target_list`, dataframe containing targets in the currently processing block , parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../123456789,A,B,C,.../[...]`
 
 #### `product_id:current_obs:*`
 
@@ -380,6 +384,7 @@ These store the metadata for the currently processing block, and are not changed
 * `product_id:current_obs:obs_end_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. This is only used to calculate t<sub>obs</sub>, and will thus be unnecessary as above.
 * `product_id:current_obs:proc_start_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. Set at the moment the processing nodes confirm receipt of the last target in the published block, and used to calculate processing duration for the abort criteria.
 * `product_id:current_obs:target_list`, dataframe containing targets in the currently processing block , parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../123456789,A,B,C,.../[...]`
+* `product_id:current_obs:remaining_to_process`, dataframe containing targets from the currently processing block for which confirmation of successful processing has not yet been received, parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../987654321,D,E,F,.../[...]`
 
 There will also need to be two additional key-value pairs (one for the current telescope status, and one for the current observation block) to store the pointing number from the schedule block.
 
