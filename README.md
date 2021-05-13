@@ -78,55 +78,55 @@ The responses to various types of Redis messages received from MeerKAT are outli
 
 #### `sensor_alerts` -> `product_id:target:radec`
 
-These messages contain the current pointing coordinates (for example, `03:27:04.19, -33:55:26.3`) for a given sub-array, or `product_id`. Upon receipt of such a message, a string containing the parsed coordinates is written to the Redis key `product_id:target_selector:coords`.
+These messages contain the current pointing coordinates (for example, `03:27:04.19, -33:55:26.3`) for a given sub-array, or `product_id`. Upon receipt of such a message, a string containing the parsed coordinates is written to the Redis key `product_id:new_obs:coords`.
 
 ```
 def _target_query(self, message):
     [...]
     coord_value = "{}, {}".format(coords.ra.deg, coords.dec.deg)
-    coord_key = "{}:target_selector:coords".format(product_id)
+    coord_key = "{}:new_obs:coords".format(product_id)
     write_pair_redis(self.redis_server, coord_key, coord_value)
 ```
 ```
 [2021-04-07 13:13:40,224 - INFO - mk_redis.py:380] Target coordinate message received: array_1:target:radec, 03:27:04.19, -33:55:26.3
-[2021-04-07 13:13:40,285 - INFO - mk_redis.py:385] Wrote [51.76745833333333, -33.92397222222222] to [array_1:target_selector:coords]
+[2021-04-07 13:13:40,285 - INFO - mk_redis.py:385] Wrote [51.76745833333333, -33.92397222222222] to [array_1:new_obs:coords]
 ```
 
 #### `sensor_alerts` -> `product_id:[...]_channelised_voltage_centre_frequency`
 
-These messages contain the centre frequency in Hz of the current observation (for example, `10000000000`) for a given sub-array. Upon receipt of such a message, a string containing the parsed frequency is written to the Redis key `product_id:target_selector:frequency`.
+These messages contain the centre frequency in Hz of the current observation (for example, `10000000000`) for a given sub-array. Upon receipt of such a message, a string containing the parsed frequency is written to the Redis key `product_id:new_obs:frequency`.
 
 ```
 def _frequency(self, message):
     [...]
     frequency_value = get_redis_key(self.redis_server, message)
-    frequency_key = "{}:target_selector:frequency".format(product_id)
+    frequency_key = "{}:new_obs:frequency".format(product_id)
     write_pair_redis(self.redis_server, frequency_key, frequency_value)    
 ```
 ```
 [2021-04-07 13:13:40,286 - INFO - mk_redis.py:454] Frequency message received: array_1:subarray_1_streams_wide_antenna_channelised_voltage_centre_frequency
-[2021-04-07 13:13:40,286 - INFO - mk_redis.py:461] Wrote [10000000000] to [array_1:target_selector:frequency]
+[2021-04-07 13:13:40,286 - INFO - mk_redis.py:461] Wrote [10000000000] to [array_1:new_obs:frequency]
 ```
 
 #### `sensor_alerts` -> `product_id:[...]_pool_resources`
 
-These messages contain the resource pool (for example, `bluse_1,cbf_1,fbfuse_1,m000,m001`) currently used for observation for a given sub-array. This pool in turn contains information on both the proxies and antennas used for the given observation. Upon receipt of such a message, a string containing the parsed pool is written to the Redis key `product_id:target_selector:pool_resources`.
+These messages contain the resource pool (for example, `bluse_1,cbf_1,fbfuse_1,m000,m001`) currently used for observation for a given sub-array. This pool in turn contains information on both the proxies and antennas used for the given observation. Upon receipt of such a message, a string containing the parsed pool is written to the Redis key `product_id:new_obs:pool_resources`.
 
 ```
 def _pool_resources(self, message):
     [...]
     pool_resources_value = get_redis_key(self.redis_server, message)
-    pool_resources_key = "{}:target_selector:pool_resources".format(product_id)
+    pool_resources_key = "{}:new_obs:pool_resources".format(product_id)
     write_pair_redis(self.redis_server, pool_resources_key, pool_resources_value)    
 ```
 ```
 [2021-04-07 13:13:40,330 - INFO - mk_redis.py:434] Pool resources message received: array_1:subarray_1_pool_resources
-[2021-04-07 13:13:40,331 - INFO - mk_redis.py:441] Wrote [bluse_1,cbf_1,fbfuse_1,m000,m001] to [array_1:target_selector:pool_resources]
+[2021-04-07 13:13:40,331 - INFO - mk_redis.py:441] Wrote [bluse_1,cbf_1,fbfuse_1,m000,m001] to [array_1:new_obs:pool_resources]
 ```
 
 #### `alerts` -> `capture-start:product_id`
 
-Upon receipt of a `capture-start` message (if the target selector is in the `ready` state) the data stored under the `product_id:target_selector:coords`, `product_id:target_selector:frequency` and `product_id:target_selector:pool_resources` Redis keys is retrieved and written to other Redis keys specific to the current observation (`product_id:current_obs:coords`, `product_id:current_obs:frequency` and `product_id:current_obs:pool_resources`).
+Upon receipt of a `capture-start` message (if the target selector is in the `ready` state) the data stored under the `product_id:new_obs:coords`, `product_id:new_obs:frequency` and `product_id:new_obs:pool_resources` Redis keys is retrieved and written to other Redis keys specific to the current observation (`product_id:current_obs:coords`, `product_id:current_obs:frequency` and `product_id:current_obs:pool_resources`).
 
 ```
 [2021-04-07 13:13:40,383 - INFO - mk_redis.py:280] Capture start message received: array_1
@@ -134,12 +134,17 @@ Upon receipt of a `capture-start` message (if the target selector is in the `rea
 ```
 def _capture_start(self, message):
     [...]
-    def fetch_data(self, product_id):
-        [...]
-        new_coords = self._get_sensor_value(product_id, "target_selector:coords")
-        new_freq = self._get_sensor_value(product_id, "target_selector:frequency")
-        new_pool = self._get_sensor_value(product_id, "target_selector:pool_resources")
-        [...]
+    if pStatus.proc_status == "ready":
+        self.fetch_data(product_id, mode="current_obs")
+```
+```
+def fetch_data(self, product_id, mode)
+    [...]
+    new_coords = self._get_sensor_value(product_id, "new_obs:coords")
+    new_freq = self._get_sensor_value(product_id, "new_obs:frequency")
+    new_pool = self._get_sensor_value(product_id, "new_obs:pool_resources")
+    [...]
+    if mode == "current_obs":
         write_pair_redis(self.redis_server, "{}:current_obs:coords".format(product_id), new_coords)
         write_pair_redis(self.redis_server, "{}:current_obs:frequency".format(product_id), new_freq)
         write_pair_redis(self.redis_server, "{}:current_obs:pool_resources".format(product_id), new_pool)
@@ -241,7 +246,19 @@ def _publish_targets(self, targets, product_id, channel, columns, sub_arr_id, se
 [2021-04-07 13:13:44,720 - INFO - mk_redis.py:777] Processing state set to 'processing'
 ```
 
-While the target selector is in the `processing` state, the `[...]:target_selector:[...]` Redis keys are continually updated with incoming status messages, while the `[...]:current_obs:[...]` Redis keys remain the same until confirmation is received from the processing nodes that processing of the current block has either been aborted or concluded successfully.
+While the target selector is in the `processing` state, the `[...]:new_obs:[...]` Redis keys are continually updated with incoming status messages, while the `[...]:current_obs:[...]` Redis keys remain the same until confirmation is received from the processing nodes that processing of the current block has either been aborted or concluded successfully.
+
+If a `capture-start` message is received while the previously published target list is still being processed by the backed (and consequently the target selector is in the `processing` state), the function calculates a target list from the data contained under the `product_id:new_obs:*` Redis keys, without overwriting the `product_id:current_obs:*` keys. The target list for the new pointing is then compared with the remaining unprocessed sources from the current sample. If the new pointing contains a greater number of sources, with a lower median distance, than the remaining unprocessed sources from the current sample, processing is aborted and the new target list is published and sent to the processing nodes.
+
+```
+def _capture_start(self, message):
+    [...]
+    if pStatus.proc_status == "ready":
+        self.fetch_data(product_id, mode="new_obs")
+        [...]
+            if (n_remaining < n_new_list) and (r_med_new_list < r_med_remaining):
+                self.abort_criteria(product_id, n_remaining, n_new_list, r_med_remaining, r_med_new_list)
+```
 
 #### `alerts` -> `capture-stop:product_id`
 
@@ -344,13 +361,13 @@ if (time_elapsed > 1200) and (time_elapsed > (2 * observation_time) - 300):
 
 A list of the redis key-value pairs generated by the target selector is presented here.
 
-#### `product_id:target_selector:*` 
+#### `product_id:new_obs:*` 
 
 These keys store the current, up-to-date telescope status and are continually updated regardless of the telescope processing state. All of them are pretty self-explanatory.
 
-* `product_id:target_selector:coords`, i.e. `74.79179, 43.0175`
-* `product_id:target_selector:pool_resources`, i.e. `bluse_1,cbf_1,fbfuse_1,m000,m001`
-* `product_id:target_selector:frequency`, i.e. `10000000000`
+* `product_id:new_obs:coords`, i.e. `74.79179, 43.0175`
+* `product_id:new_obs:pool_resources`, i.e. `bluse_1,cbf_1,fbfuse_1,m000,m001`
+* `product_id:new_obs:frequency`, i.e. `10000000000`
 
 #### `product_id:current_obs:*`
 

@@ -124,7 +124,7 @@ class Listen(threading.Thread):
             'frequency': self._frequency,
             'processing_success': self._processing_success,
             'acknowledge': self._acknowledge,
-            'target_selector': self._pass,
+            'new_obs': self._pass,
             'current_obs': self._pass
         }
 
@@ -156,38 +156,45 @@ class Listen(threading.Thread):
         Parameters:
             product_id: (str)
                 Product ID parsed from redis message
-
+            mode: (str)
+                Mode in which function is to be run; "current_obs" fetches the data and writes it to current_obs redis
+                keys, while "new_obs" fetches the data for comparison against the currently processing block, without
+                overwriting keys relating to the currently processing observations
         Returns:
             None
         """
-        if ("None" not in str(self._get_sensor_value(product_id, "target_selector:coords")))\
-                and ("None" not in str(self._get_sensor_value(product_id, "target_selector:frequency")))\
-                and ("None" not in str(self._get_sensor_value(product_id, "target_selector:pool_resources"))):
+        if ("None" not in str(self._get_sensor_value(product_id, "new_obs:coords")))\
+                and ("None" not in str(self._get_sensor_value(product_id, "new_obs:frequency")))\
+                and ("None" not in str(self._get_sensor_value(product_id, "new_obs:pool_resources"))):
             try:
                 # create redis key-val pairs to store current observation data & current telescope status data
-                new_coords = self._get_sensor_value(product_id, "target_selector:coords")
+                new_coords = self._get_sensor_value(product_id, "new_obs:coords")
                 coords_ra = float(new_coords.split(", ")[0])
                 coords_dec = float(new_coords.split(", ")[1])
-                new_freq = self._get_sensor_value(product_id, "target_selector:frequency")
-                new_pool = self._get_sensor_value(product_id, "target_selector:pool_resources")
+                new_freq = self._get_sensor_value(product_id, "new_obs:frequency")
+                new_pool = self._get_sensor_value(product_id, "new_obs:pool_resources")
 
                 if mode == "current_obs":
                     write_pair_redis(self.redis_server, "{}:{}:coords".format(product_id, mode), new_coords)
                     logger.info("Fetched {}:{}:coords: {}"
-                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:coords".format(mode))))
+                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:coords"
+                                                                                 .format(mode))))
                     write_pair_redis(self.redis_server, "{}:{}:frequency".format(product_id, mode), new_freq)
                     logger.info("Fetched {}:{}:frequency: {}"
-                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:frequency".format(mode))))
+                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:frequency"
+                                                                                 .format(mode))))
                     write_pair_redis(self.redis_server, "{}:{}:pool_resources".format(product_id, mode), new_pool)
                     logger.info("Fetched {}:{}:pool_resources: {}"
-                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources".format(mode))))
+                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources"
+                                                                                 .format(mode))))
 
                 targets = self\
                     .engine.select_targets(np.deg2rad(coords_ra),
                                            np.deg2rad(coords_dec),
                                            current_freq=self._get_sensor_value(product_id, "{}:frequency".format(mode)),
                                            beam_rad=self._beam_radius(self._get_sensor_value(product_id,
-                                                                                             "{}:frequency".format(mode))))
+                                                                                             "{}:frequency"
+                                                                                             .format(mode))))
 
                 targets_table = pd.DataFrame.to_csv(targets)
 
@@ -242,7 +249,7 @@ class Listen(threading.Thread):
             key_glob = ('{}:*:{}'.format(product_id, sensor))
             success_key_glob = ('{}:success_source_id*'.format(product_id))
             ackn_key_glob = ('{}:acknowledge_source_id*'.format(product_id))
-            selector_key_glob = ("{}:target_selector:*".format(product_id))
+            new_obs_key_glob = ("{}:new_obs:*".format(product_id))
             current_key_glob = ("{}:current_obs:*".format(product_id))
             for a in self.redis_server.scan_iter(key_glob):
                 logger.info('Removing key: {}'.format(a))
@@ -251,7 +258,7 @@ class Listen(threading.Thread):
                 delete_key(self.redis_server, b)
             for c in self.redis_server.scan_iter(ackn_key_glob):
                 delete_key(self.redis_server, c)
-            for d in self.redis_server.scan_iter(selector_key_glob):
+            for d in self.redis_server.scan_iter(new_obs_key_glob):
                 delete_key(self.redis_server, d)
             for e in self.redis_server.scan_iter(current_key_glob):
                 delete_key(self.redis_server, e)
@@ -291,11 +298,11 @@ class Listen(threading.Thread):
                 self._publish_targets(targets_to_publish, product_id, sub_arr_id)
 
         elif pStatus.proc_status == "processing":
-            self.fetch_data(product_id, mode="target_selector")
-            if "None" not in str(self._get_sensor_value(product_id, "target_selector:target_list")):
+            self.fetch_data(product_id, mode="new_obs")
+            if "None" not in str(self._get_sensor_value(product_id, "new_obs:target_list")):
 
                 new_target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
-                                                                              "target_selector:target_list")), sep=",",
+                                                                              "new_obs:target_list")), sep=",",
                                               index_col=0)
 
                 remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
@@ -380,8 +387,8 @@ class Listen(threading.Thread):
         if sensor.startswith('acknowledge'):
             sensor = 'acknowledge'
 
-        if sensor.startswith('target_selector'):
-            sensor = 'target_selector'
+        if sensor.startswith('new_obs'):
+            sensor = 'new_obs'
 
         if sensor.startswith('current_obs'):
             sensor = 'current_obs'
@@ -409,7 +416,7 @@ class Listen(threading.Thread):
         else:
             logger.info("Target coordinate message received: {}".format(message))
             coords = SkyCoord(' '.join(value.split(', ')[-2:]), unit=(u.hourangle, u.deg))
-            coord_key = "{}:target_selector:coords".format(product_id)
+            coord_key = "{}:new_obs:coords".format(product_id)
             coord_value = "{}, {}".format(coords.ra.deg, coords.dec.deg)
             write_pair_redis(self.redis_server, coord_key, coord_value)
             logger.info("Wrote [{}] to [{}]".format(coord_value, coord_key))
@@ -466,7 +473,7 @@ class Listen(threading.Thread):
         product_id, _ = message.split(':')
         pool_resources_value = get_redis_key(self.redis_server, message)
 
-        pool_resources_key = "{}:target_selector:pool_resources".format(product_id)
+        pool_resources_key = "{}:new_obs:pool_resources".format(product_id)
         write_pair_redis(self.redis_server, pool_resources_key, pool_resources_value)
         logger.info("Wrote [{}] to [{}]".format(pool_resources_value, pool_resources_key))
 
@@ -486,7 +493,7 @@ class Listen(threading.Thread):
         product_id, sensor_name = message.split(':')
         frequency_value = get_redis_key(self.redis_server, message)
 
-        frequency_key = "{}:target_selector:frequency".format(product_id)
+        frequency_key = "{}:new_obs:frequency".format(product_id)
         write_pair_redis(self.redis_server, frequency_key, frequency_value)
         logger.info("Wrote [{}] to [{}]".format(frequency_value, frequency_key))
 
@@ -813,9 +820,8 @@ class Listen(threading.Thread):
            observation
 
        Parameters:
-            product_id: (str)
-                product ID for the given sub-array
-
+            current_freq: (float)
+                Central frequency for the current observation in Hertz
         Returns:
             beam_rad: (float)
                 Radius of the beam in radians
