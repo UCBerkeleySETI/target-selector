@@ -294,10 +294,6 @@ class Listen(threading.Thread):
             self.fetch_data(product_id, mode="target_selector")
             if "None" not in str(self._get_sensor_value(product_id, "target_selector:target_list")):
 
-                #  stars in the 26m sample: d_hi(1m) = 175 pc, d_median = 771 pc
-                limiting_distance = 175
-                limiting_fraction = 0.2
-
                 new_target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                               "target_selector:target_list")), sep=",",
                                               index_col=0)
@@ -306,11 +302,13 @@ class Listen(threading.Thread):
                                                                                    "current_obs:remaining_to_process")),
                                                    sep=",", index_col=0)
 
-                n_remaining = (len(remaining_to_process.loc[remaining_to_process['dist_c'] <= limiting_distance].index))
-                n_new_list = (len(new_target_list.loc[new_target_list['dist_c'] <= limiting_distance].index))
+                n_remaining = len(remaining_to_process.index)
+                n_new_list = len(new_target_list.index)
+                r_med_remaining = remaining_to_process['dist_c'].median()
+                r_med_new_list = new_target_list['dist_c'].median()
 
-                if n_remaining/n_new_list < limiting_fraction:
-                    self.abort_criteria(product_id, limiting_distance, limiting_fraction, n_remaining, n_new_list)
+                if (n_remaining < n_new_list) and (r_med_new_list < r_med_remaining):
+                    self.abort_criteria(product_id, n_remaining, n_new_list, r_med_remaining, r_med_new_list)
                     self.fetch_data(product_id, mode="current_obs")
                     if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
                         sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
@@ -570,7 +568,7 @@ class Listen(threading.Thread):
     """
 
     def abort_criteria(self, product_id, time_elapsed=None, observation_time=None, fraction_processed=None,
-                       limiting_distance=None, limiting_fraction=None, n_remaining=None, n_new_list=None):
+                       n_remaining=None, n_new_list=None, r_med_remaining=None, r_med_new_list=None):
         """Function to abort processing if certain conditions are met
 
         Parameters:
@@ -582,16 +580,14 @@ class Listen(threading.Thread):
                 Total recorded observation time from the processing nodes (t_obs)
             fraction_processed: (str)
                 Fraction of sources successfully processed from the currently processing block
-            limiting_distance: (str)
-                Distance to use when aborting processing based on amount of sources within the next pointing compared
-                with those remaining to be processed from the current pointing
-            limiting_fraction: (str)
-                Fraction to use when aborting processing based on amount of sources within the next pointing compared
-                with those remaining to be processed from the current pointing
             n_remaining: (str)
-                Number of sources remaining to be processed in the current block within limiting_distance
+                Number of sources remaining to be processed in the current block
             n_new_list: (str)
-                Number of sources in the new target list within limiting_distance
+                Number of sources in the new target list
+            r_med_remaining: (str)
+                Median distance of sources remaining to be processed in the current block
+            r_med_new_list: (str)
+                Median distance of sources in the new target list
 
         Returns:
             None
@@ -599,16 +595,20 @@ class Listen(threading.Thread):
         if (not fraction_processed) and (not observation_time):
             # processing aborted based on greater number of sources within a given distance in the new pointing compared
             # with the remaining unprocessed sources
-            logger.info("{} sources within {} pc left to process".format(n_remaining, limiting_distance))
-            logger.info("{} sources within {} pc contained in new pointing".format(n_new_list, limiting_distance))
-            logger.info("Limiting fraction of {} exceeded. Aborting processing".format(limiting_fraction))
+            logger.info("{} sources with a median distance of {} pc left to process"
+                        .format(n_remaining, r_med_remaining))
+            logger.info("{} sources with a median distance of {} pc contained in new pointing"
+                        .format(n_new_list, r_med_new_list))
+            logger.info("New pointing contains a greater number of sources with a lower median distance."
+                        " Aborting processing of current pointing")
             self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info("Processing state set to \'ready\'")
 
         elif not fraction_processed:  # processing aborted based on observation time (t_obs)
             if (time_elapsed > 1200) and (time_elapsed > (2 * observation_time) - 300):
-                logger.info("Processing time has exceeded both 20 and (2t_obs - 5) minutes. Aborting processing")
+                logger.info("Processing time has exceeded both 20 and (2t_obs - 5) minutes."
+                            " Aborting processing of current pointing")
                 self._deconfigure(product_id)
                 pStatus.proc_status = "ready"
                 logger.info("Processing state set to \'ready\'")
@@ -616,7 +616,7 @@ class Listen(threading.Thread):
         elif not observation_time:  # processing aborted based on absolute processing time
             if (fraction_processed > 0.9) and (time_elapsed > 600):
                 logger.info("Processing time has exceeded 10 minutes, with >90% of targets processed successfully."
-                            " Aborting processing")
+                            " Aborting processing of current pointing")
                 self._deconfigure(product_id)
                 pStatus.proc_status = "ready"
                 logger.info("Processing state set to \'ready\'")
