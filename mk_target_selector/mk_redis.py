@@ -298,24 +298,69 @@ class Listen(threading.Thread):
                 self._publish_targets(targets_to_publish, product_id, sub_arr_id)
 
         elif pStatus.proc_status == "processing":
+            logger.info("Still processing previous pointing. Checking abort criteria")
             self.fetch_data(product_id, mode="new_obs")
             if "None" not in str(self._get_sensor_value(product_id, "new_obs:target_list")):
 
+                # read in and format new target list from redis key to dataframe
                 new_target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                               "new_obs:target_list")), sep=",",
                                               index_col=0)
+                # create empty array for CWTFM coefficient values in the new target list
+                cwtfm_coeff_new = np.full(new_target_list.shape[0], 0, dtype=float)
+                # fill this array with the (d^2 / N_sources) value for each row
+                cwtfm_coeff_new[new_target_list.index] = (new_target_list['dist_c'])**2 / (new_target_list.index + 1)
+                # append this array to the new target list dataframe
+                new_target_list['cwtfm_coeff'] = cwtfm_coeff_new
+                logger.info(new_target_list)
 
+                # read in and format list of targets which remain to be processed from redis key to dataframe
                 remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                                    "current_obs:remaining_to_process")),
                                                    sep=",", index_col=0)
+                # create empty array for CWTFM coefficient values in the remaining target list
+                cwtfm_coeff_remaining = np.full(remaining_to_process.shape[0], 0, dtype=float)
+                # fill this array with the (d^2 / N_sources) value for each row
+                cwtfm_coeff_remaining[remaining_to_process.index] = (remaining_to_process['dist_c'])**2 / \
+                                                                    (remaining_to_process.index + 1)
+                # append this array to the remaining list dataframe
+                remaining_to_process['cwtfm_coeff'] = cwtfm_coeff_remaining
+                logger.info(remaining_to_process)
 
-                n_remaining = len(remaining_to_process.index)
-                n_new_list = len(new_target_list.index)
-                r_med_remaining = remaining_to_process['dist_c'].median()
-                r_med_new_list = new_target_list['dist_c'].median()
+                # mean_new_priority = new_target_list['priority'].mean()
+                min_new_cwtfm_coeff = new_target_list['cwtfm_coeff'].min()
+                n_new_obs = len(new_target_list.index)
+                new_cwtfm_coeff_dist = new_target_list.loc[new_target_list['cwtfm_coeff']
+                                                           == min_new_cwtfm_coeff]['dist_c'].item()
+                n_new_dist = len(new_target_list.loc[new_target_list['dist_c']
+                                                     <= new_cwtfm_coeff_dist].index)
+                mean_new_priority = new_target_list.loc[new_target_list['dist_c']
+                                                        <= new_cwtfm_coeff_dist]['priority'].mean()
 
-                if (n_remaining < n_new_list) and (r_med_new_list < r_med_remaining):
-                    self.abort_criteria(product_id, n_remaining, n_new_list, r_med_remaining, r_med_new_list)
+                # mean_remaining_priority = remaining_to_process['priority'].mean()
+                min_remaining_cwtfm_coeff = remaining_to_process['cwtfm_coeff'].min()
+                n_remaining_obs = len(remaining_to_process.index)
+                remaining_cwtfm_coeff_dist = remaining_to_process.loc[remaining_to_process['cwtfm_coeff']
+                                                                      == min_remaining_cwtfm_coeff]['dist_c'].item()
+                n_rem_dist = len(remaining_to_process.loc[remaining_to_process['dist_c']
+                                                          <= remaining_cwtfm_coeff_dist].index)
+                mean_remaining_priority = remaining_to_process.loc[remaining_to_process['dist_c']
+                                                                   <= remaining_cwtfm_coeff_dist]['priority'].mean()
+
+                logger.info("Minimum CWTFM coefficient (d^2 / N_sources) for {} targets in new pointing:"
+                            " {} at {} pc"
+                            .format(n_new_obs, min_new_cwtfm_coeff, new_cwtfm_coeff_dist))
+                logger.info("{} targets in new pointing within {} pc, with a mean priority of {}"
+                            .format(n_new_dist, new_cwtfm_coeff_dist, mean_new_priority))
+
+                logger.info("Minimum CWTFM coefficient (d^2 / N_sources) for {} targets remaining to process:"
+                            " {} at {} pc"
+                            .format(n_remaining_obs, min_remaining_cwtfm_coeff, remaining_cwtfm_coeff_dist))
+                logger.info("{} targets remaining to process within {} pc, with a mean priority of {}"
+                            .format(n_rem_dist, remaining_cwtfm_coeff_dist, mean_remaining_priority))
+
+                if (min_new_cwtfm_coeff < min_remaining_cwtfm_coeff) and (mean_new_priority <= mean_remaining_priority):
+                    self.abort_criteria(product_id)
                     self.fetch_data(product_id, mode="current_obs")
                     if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
                         sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
@@ -333,6 +378,12 @@ class Listen(threading.Thread):
                                          "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
                         self._publish_targets(targets_to_publish, product_id, sub_arr_id)
+
+                elif (min_new_cwtfm_coeff >= min_remaining_cwtfm_coeff) \
+                        or (mean_new_priority > mean_remaining_priority):
+                    logger.info("New pointing does not contain sources with a lower minimum achievable CWTFM "
+                                "coefficient and an equal or lower mean priority. Abort criteria not met. Continuing")
+                    pass
 
     def _capture_stop(self, message):
         """Function that responds to capture stop updates. Takes observing end time and stores metadata
@@ -574,8 +625,7 @@ class Listen(threading.Thread):
 
     """
 
-    def abort_criteria(self, product_id, time_elapsed=None, observation_time=None, fraction_processed=None,
-                       n_remaining=None, n_new_list=None, r_med_remaining=None, r_med_new_list=None):
+    def abort_criteria(self, product_id, time_elapsed=None, observation_time=None, fraction_processed=None):
         """Function to abort processing if certain conditions are met
 
         Parameters:
@@ -587,27 +637,15 @@ class Listen(threading.Thread):
                 Total recorded observation time from the processing nodes (t_obs)
             fraction_processed: (str)
                 Fraction of sources successfully processed from the currently processing block
-            n_remaining: (str)
-                Number of sources remaining to be processed in the current block
-            n_new_list: (str)
-                Number of sources in the new target list
-            r_med_remaining: (str)
-                Median distance of sources remaining to be processed in the current block
-            r_med_new_list: (str)
-                Median distance of sources in the new target list
 
         Returns:
             None
         """
         if (not fraction_processed) and (not observation_time):
-            # processing aborted based on greater number of sources within a given distance in the new pointing compared
-            # with the remaining unprocessed sources
-            logger.info("{} sources with a median distance of {} pc left to process"
-                        .format(n_remaining, r_med_remaining))
-            logger.info("{} sources with a median distance of {} pc contained in new pointing"
-                        .format(n_new_list, r_med_new_list))
-            logger.info("New pointing contains a greater number of sources with a lower median distance."
-                        " Aborting processing of current pointing")
+            # processing aborted based on priority of new sources & optimising CWTFM values
+            # (proportional to d^2 / N_stars)
+            logger.info("New pointing contains sources with a lower minimum achievable CWTFM coefficient, and an equal "
+                        "or lower mean priority. Aborting")
             self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info("Processing state set to \'ready\'")
@@ -859,7 +897,10 @@ class Listen(threading.Thread):
         channel = "bluse:///set"
         targ_dict = targets.loc[:, columns].to_dict('list')
         key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
+        key_current_obs = '{}:current_obs:remaining_to_process'.format(product_id)
         write_pair_redis(self.redis_server, key, json.dumps(targ_dict))
+        to_process = pd.DataFrame.to_csv(targets)
+        write_pair_redis(self.redis_server, key_current_obs, to_process)
         publish(self.redis_server, channel, key)
 
         logger.info('Targets published to {}'.format(channel))
