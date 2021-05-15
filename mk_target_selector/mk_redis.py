@@ -327,23 +327,31 @@ class Listen(threading.Thread):
                 remaining_to_process['cwtfm_coeff'] = cwtfm_coeff_remaining
                 logger.info(remaining_to_process)
 
-                # mean_new_priority = new_target_list['priority'].mean()
+                # minimum achievable CWTFM coefficient for sources in the new target list
                 min_new_cwtfm_coeff = new_target_list['cwtfm_coeff'].min()
+                # number of sources in the new target list
                 n_new_obs = len(new_target_list.index)
+                # distance at which minimum CWTFM coefficient is achieved for the new target list
                 new_cwtfm_coeff_dist = new_target_list.loc[new_target_list['cwtfm_coeff']
                                                            == min_new_cwtfm_coeff]['dist_c'].item()
+                # number of sources within this distance in the new target list
                 n_new_dist = len(new_target_list.loc[new_target_list['dist_c']
                                                      <= new_cwtfm_coeff_dist].index)
+                # mean priority of sources within this distance in the new target list
                 mean_new_priority = new_target_list.loc[new_target_list['dist_c']
                                                         <= new_cwtfm_coeff_dist]['priority'].mean()
 
-                # mean_remaining_priority = remaining_to_process['priority'].mean()
+                # minimum achievable CWTFM coefficient for sources remaining to process
                 min_remaining_cwtfm_coeff = remaining_to_process['cwtfm_coeff'].min()
+                # number of sources remaining to process
                 n_remaining_obs = len(remaining_to_process.index)
+                # distance at which minimum CWTFM coefficient is achieved for the sources remaining to process
                 remaining_cwtfm_coeff_dist = remaining_to_process.loc[remaining_to_process['cwtfm_coeff']
                                                                       == min_remaining_cwtfm_coeff]['dist_c'].item()
+                # number of sources remaining to process within this distance
                 n_rem_dist = len(remaining_to_process.loc[remaining_to_process['dist_c']
                                                           <= remaining_cwtfm_coeff_dist].index)
+                # mean priority of sources remaining to process within this distance
                 mean_remaining_priority = remaining_to_process.loc[remaining_to_process['dist_c']
                                                                    <= remaining_cwtfm_coeff_dist]['priority'].mean()
 
