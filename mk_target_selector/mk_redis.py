@@ -651,7 +651,7 @@ class Listen(threading.Thread):
         """
         if (not fraction_processed) and (not observation_time):
             # processing aborted based on priority of new sources & optimising CWTFM values
-            # (proportional to d^2 / N_stars)
+            # (CWTFM is proportional to d^2 / N_stars ; smaller = better)
             logger.info("New pointing contains sources with a lower minimum achievable CWTFM coefficient, and an equal "
                         "or lower mean priority. Aborting")
             self._deconfigure(product_id)

@@ -328,7 +328,7 @@ class Triage(DatabaseHandler):
         priority[tb['table_name'].str.contains('exotica')] = 3
 
         # sources previously observed & successfully processed
-        priority[tb['source_id'].isin(successfully_processed['source_id'])] = 6
+        priority[pd.to_numeric(tb['source_id']).isin(successfully_processed['source_id'])] = 6
 
         # sources previously observed, but at a different frequency
         prev_freq = successfully_processed.groupby('source_id').agg(lambda x: ', '.join(x.values))
@@ -336,12 +336,12 @@ class Triage(DatabaseHandler):
         most_antennas = successfully_processed.groupby('source_id')['n_antennas'].max()
         current_band = self._freqBand(current_freq)
 
-        for p in tb['source_id']:
+        for p in pd.to_numeric(tb['source_id']):
             try:
                 if current_band in prev_freq.loc[p]['bands']:
                     pass
                 else:
-                    priority[tb['source_id'] == p] = 5
+                    priority[pd.to_numeric(tb['source_id']) == p] = 5
             except KeyError:  # chosen source is not in prev_freq table
                 pass
             except IndexError:  # prev_freq table is empty
@@ -349,7 +349,7 @@ class Triage(DatabaseHandler):
             # sources previously observed, but for < 5 minutes, or with < 58 antennas
             try:
                 if (longest_obs[p] < 300) or (most_antennas[p] < 58):
-                    priority[tb['source_id'] == p] = 4
+                    priority[pd.to_numeric(tb['source_id']) == p] = 4
             except KeyError:  # chosen source is not in prev_obs table
                 pass
             except IndexError:  # prev_obs table is empty
