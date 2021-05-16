@@ -200,7 +200,7 @@ class Triage(DatabaseHandler):
                             processed=processed)
         self.conn.execute(update)
 
-    def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq):
+    def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq, check_flag=False):
         """Returns a string which acts as a pre-filter for the more computationally
         intensive search
 
@@ -219,6 +219,9 @@ class Triage(DatabaseHandler):
                 Columns to select within the table
             current_freq: (str)
                 Current central frequency of observation in Hz
+            check_flag: (bool)
+                Denotes whether the target selector is selecting targets to publish, or to check against existing target
+                list. Value is TRUE in the second case, and the beam radius calculation
         Returns:
             query: (str)
                 SQL query string
@@ -226,8 +229,11 @@ class Triage(DatabaseHandler):
         """
         current_band = self._freqBand(current_freq)
         beam_rad_arcmin = beam_rad * (180 / math.pi) * 60
-        logger.info("Beam radius at {} ({}): {} radians = {} arc minutes".format(self.freq_format(current_freq),
-                                                                               current_band, beam_rad, beam_rad_arcmin))
+
+        if not check_flag:
+            logger.info("Beam radius at {} ({}): {} radians = {} arc minutes"
+                        .format(self.freq_format(current_freq), current_band, beam_rad, beam_rad_arcmin))
+
         if c_dec - beam_rad <= - np.pi / 2.0:
             ra_min, ra_max = 0.0, 2.0 * np.pi
             dec_min = -np.pi / 2.0
@@ -322,13 +328,14 @@ class Triage(DatabaseHandler):
         prev_obs = pd.read_sql(query, con=self.conn)
         # logger.info("Previous observations:\n{}\n".format(prev_obs.drop('antennas', axis=1)))
         # prev_obs.to_csv('prev_obs.csv')
-        successfully_processed = prev_obs.drop('antennas', axis=1).loc[prev_obs['processed'].isin(['1'])]
+        successfully_processed \
+            = prev_obs.astype({'source_id': 'str'}).drop('antennas', axis=1).loc[prev_obs['processed'].isin(['1'])]
 
         # exotica sources
         priority[tb['table_name'].str.contains('exotica')] = 3
 
         # sources previously observed & successfully processed
-        priority[pd.to_numeric(tb['source_id']).isin(successfully_processed['source_id'])] = 6
+        priority[tb['source_id'].isin(successfully_processed['source_id'])] = 6
 
         # sources previously observed, but at a different frequency
         prev_freq = successfully_processed.groupby('source_id').agg(lambda x: ', '.join(x.values))
@@ -336,12 +343,12 @@ class Triage(DatabaseHandler):
         most_antennas = successfully_processed.groupby('source_id')['n_antennas'].max()
         current_band = self._freqBand(current_freq)
 
-        for p in pd.to_numeric(tb['source_id']):
+        for p in tb['source_id']:
             try:
                 if current_band in prev_freq.loc[p]['bands']:
                     pass
                 else:
-                    priority[pd.to_numeric(tb['source_id']) == p] = 5
+                    priority[tb['source_id'] == p] = 5
             except KeyError:  # chosen source is not in prev_freq table
                 pass
             except IndexError:  # prev_freq table is empty
@@ -349,7 +356,7 @@ class Triage(DatabaseHandler):
             # sources previously observed, but for < 5 minutes, or with < 58 antennas
             try:
                 if (longest_obs[p] < 300) or (most_antennas[p] < 58):
-                    priority[pd.to_numeric(tb['source_id']) == p] = 4
+                    priority[tb['source_id'] == p] = 4
             except KeyError:  # chosen source is not in prev_obs table
                 pass
             except IndexError:  # prev_obs table is empty
@@ -361,7 +368,8 @@ class Triage(DatabaseHandler):
         tb['priority'] = priority
         return tb.sort_values('priority')
 
-    def select_targets(self, c_ra, c_dec, beam_rad, current_freq='Unknown', table='target_list', cols=None):
+    def select_targets(self, c_ra, c_dec, beam_rad, current_freq='Unknown', table='target_list',
+                       cols=None, check_flag=False):
         """Returns a string to query the 1 million star database to find sources
            within some primary beam area
 
@@ -378,6 +386,9 @@ class Triage(DatabaseHandler):
                 Name of the MySQL table that is being queried
             cols: (list)
                 Columns of table to output
+            check_flag: (bool)
+                Denotes whether the target selector is selecting targets to publish, or to check against existing target
+                list. Value is TRUE in the second case, and the SQL query is not logged
 
         Returns:
             target_list: (DataFrame)
@@ -389,7 +400,7 @@ class Triage(DatabaseHandler):
         if not cols:
             cols = ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']
 
-        mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols, current_freq)
+        mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols, current_freq, check_flag)
 
         query = """
                 SELECT *
@@ -398,7 +409,9 @@ class Triage(DatabaseHandler):
                 COS({c_dec}) * COS({c_ra} - RADIANS(ra))) < {beam_rad}; \
                 """.format(mask=mask, c_ra=c_ra,
                            c_dec=c_dec, beam_rad=beam_rad)
-        logger.info('Query:\n {}\n'.format(query))
+
+        if not check_flag:
+            logger.info('Query:\n {}\n'.format(query))
 
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con=self.conn)

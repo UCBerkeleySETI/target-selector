@@ -188,19 +188,35 @@ class Listen(threading.Thread):
                                 .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources"
                                                                                  .format(mode))))
 
+                check_flag = False
+                if mode == "current_obs":
+                    check_flag = False
+                elif mode == "new_obs":
+                    check_flag = True
+
                 targets = self\
                     .engine.select_targets(np.deg2rad(coords_ra),
                                            np.deg2rad(coords_dec),
                                            current_freq=self._get_sensor_value(product_id, "{}:frequency".format(mode)),
                                            beam_rad=self._beam_radius(self._get_sensor_value(product_id,
                                                                                              "{}:frequency"
-                                                                                             .format(mode))))
-
-                targets_table = pd.DataFrame.to_csv(targets)
+                                                                                             .format(mode))),
+                                           check_flag=check_flag)
+                targets_dist = targets.sort_values('dist_c', ignore_index=True)
+                # create empty array for CWTFM parameter values in the target list
+                cwtfm_param = np.full(targets_dist.shape[0], 0, dtype=float)
+                # fill this array with the (d^2 / N_sources) value for each row
+                cwtfm_param[targets_dist.index] = (targets_dist['dist_c'])**2 / (targets_dist.index + 1)
+                # append this array to the target list dataframe
+                targets_dist['cwtfm_param'] = cwtfm_param
+                targets_dist.sort_values(by=['priority', 'dist_c'], ignore_index=True)
+                targets_table = pd.DataFrame.to_csv(targets_dist)
 
                 if len(targets.index) == 0:
                     self.coord_error(coords=self._get_sensor_value(product_id, "{}:coords".format(mode)),
-                                     frequency=self._get_sensor_value(product_id, "{}:frequency".format(mode)))
+                                     frequency=self._get_sensor_value(product_id, "{}:frequency".format(mode)),
+                                     mode=mode,
+                                     product_id=product_id)
                 else:
                     write_pair_redis(self.redis_server, "{}:{}:target_list".format(product_id, mode), targets_table)
 
@@ -306,68 +322,59 @@ class Listen(threading.Thread):
                 new_target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                               "new_obs:target_list")), sep=",",
                                               index_col=0)
-                # create empty array for CWTFM coefficient values in the new target list
-                cwtfm_coeff_new = np.full(new_target_list.shape[0], 0, dtype=float)
-                # fill this array with the (d^2 / N_sources) value for each row
-                cwtfm_coeff_new[new_target_list.index] = (new_target_list['dist_c'])**2 / (new_target_list.index + 1)
-                # append this array to the new target list dataframe
-                new_target_list['cwtfm_coeff'] = cwtfm_coeff_new
-                logger.info(new_target_list)
 
                 # read in and format list of targets which remain to be processed from redis key to dataframe
                 remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                                    "current_obs:remaining_to_process")),
                                                    sep=",", index_col=0)
-                # create empty array for CWTFM coefficient values in the remaining target list
-                cwtfm_coeff_remaining = np.full(remaining_to_process.shape[0], 0, dtype=float)
-                # fill this array with the (d^2 / N_sources) value for each row
-                cwtfm_coeff_remaining[remaining_to_process.index] = (remaining_to_process['dist_c'])**2 / \
-                                                                    (remaining_to_process.index + 1)
-                # append this array to the remaining list dataframe
-                remaining_to_process['cwtfm_coeff'] = cwtfm_coeff_remaining
-                logger.info(remaining_to_process)
 
-                # minimum achievable CWTFM coefficient for sources in the new target list
-                min_new_cwtfm_coeff = new_target_list['cwtfm_coeff'].min()
+                # minimum achievable CWTFM parameter for sources in the new target list
+                min_new_cwtfm = new_target_list['cwtfm_param'].min()
                 # number of sources in the new target list
                 n_new_obs = len(new_target_list.index)
-                # distance at which minimum CWTFM coefficient is achieved for the new target list
-                new_cwtfm_coeff_dist = new_target_list.loc[new_target_list['cwtfm_coeff']
-                                                           == min_new_cwtfm_coeff]['dist_c'].item()
+                # distance at which minimum CWTFM parameter is achieved for the new target list
+                new_cwtfm_dist = new_target_list.loc[new_target_list['cwtfm_param']
+                                                     == min_new_cwtfm]['dist_c'].item()
                 # number of sources within this distance in the new target list
                 n_new_dist = len(new_target_list.loc[new_target_list['dist_c']
-                                                     <= new_cwtfm_coeff_dist].index)
+                                                     <= new_cwtfm_dist].index)
+                # priority at which minimum CWTFM parameter is achieved for the new target list
+                new_cwtfm_prio = new_target_list.loc[new_target_list['cwtfm_param']
+                                                     == min_new_cwtfm]['priority'].item()
                 # mean priority of sources within this distance in the new target list
                 mean_new_priority = new_target_list.loc[new_target_list['dist_c']
-                                                        <= new_cwtfm_coeff_dist]['priority'].mean()
+                                                        <= new_cwtfm_dist]['priority'].mean()
 
-                # minimum achievable CWTFM coefficient for sources remaining to process
-                min_remaining_cwtfm_coeff = remaining_to_process['cwtfm_coeff'].min()
+                # minimum achievable CWTFM parameter for sources remaining to process
+                min_remaining_cwtfm = remaining_to_process['cwtfm_param'].min()
                 # number of sources remaining to process
                 n_remaining_obs = len(remaining_to_process.index)
-                # distance at which minimum CWTFM coefficient is achieved for the sources remaining to process
-                remaining_cwtfm_coeff_dist = remaining_to_process.loc[remaining_to_process['cwtfm_coeff']
-                                                                      == min_remaining_cwtfm_coeff]['dist_c'].item()
+                # distance at which minimum CWTFM parameter is achieved for the sources remaining to process
+                remaining_cwtfm_dist = remaining_to_process.loc[remaining_to_process['cwtfm_param']
+                                                                == min_remaining_cwtfm]['dist_c'].item()
                 # number of sources remaining to process within this distance
                 n_rem_dist = len(remaining_to_process.loc[remaining_to_process['dist_c']
-                                                          <= remaining_cwtfm_coeff_dist].index)
+                                                          <= remaining_cwtfm_dist].index)
+                # priority at which minimum CWTFM parameter is achieved for the sources remaining to process
+                remaining_cwtfm_prio = remaining_to_process.loc[remaining_to_process['cwtfm_param']
+                                                                == min_remaining_cwtfm]['priority'].item()
                 # mean priority of sources remaining to process within this distance
                 mean_remaining_priority = remaining_to_process.loc[remaining_to_process['dist_c']
-                                                                   <= remaining_cwtfm_coeff_dist]['priority'].mean()
+                                                                   <= remaining_cwtfm_dist]['priority'].mean()
 
-                logger.info("Minimum CWTFM coefficient (d^2 / N_sources) for {} targets in new pointing:"
-                            " {} at {} pc"
-                            .format(n_new_obs, min_new_cwtfm_coeff, new_cwtfm_coeff_dist))
+                logger.info("Minimum CWTFM parameter (d^2 / N_sources) for {} targets in new pointing:"
+                            " {} at {} pc, priority {}"
+                            .format(n_new_obs, min_new_cwtfm, new_cwtfm_dist, new_cwtfm_prio))
                 logger.info("{} targets in new pointing within {} pc, with a mean priority of {}"
-                            .format(n_new_dist, new_cwtfm_coeff_dist, mean_new_priority))
+                            .format(n_new_dist, new_cwtfm_dist, mean_new_priority))
 
-                logger.info("Minimum CWTFM coefficient (d^2 / N_sources) for {} targets remaining to process:"
-                            " {} at {} pc"
-                            .format(n_remaining_obs, min_remaining_cwtfm_coeff, remaining_cwtfm_coeff_dist))
+                logger.info("Minimum CWTFM parameter (d^2 / N_sources) for {} targets remaining to process:"
+                            " {} at {} pc, priority {}"
+                            .format(n_remaining_obs, min_remaining_cwtfm, remaining_cwtfm_dist, remaining_cwtfm_prio))
                 logger.info("{} targets remaining to process within {} pc, with a mean priority of {}"
-                            .format(n_rem_dist, remaining_cwtfm_coeff_dist, mean_remaining_priority))
+                            .format(n_rem_dist, remaining_cwtfm_dist, mean_remaining_priority))
 
-                if (min_new_cwtfm_coeff < min_remaining_cwtfm_coeff) and (mean_new_priority <= mean_remaining_priority):
+                if (min_new_cwtfm < min_remaining_cwtfm) and (mean_new_priority <= mean_remaining_priority):
                     self.abort_criteria(product_id)
                     self.fetch_data(product_id, mode="current_obs")
                     if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
@@ -387,7 +394,7 @@ class Listen(threading.Thread):
 
                         self._publish_targets(targets_to_publish, product_id, sub_arr_id)
 
-                elif (min_new_cwtfm_coeff >= min_remaining_cwtfm_coeff) \
+                elif (min_new_cwtfm >= min_remaining_cwtfm) \
                         or (mean_new_priority > mean_remaining_priority):
                     logger.info("New pointing does not contain sources with a lower minimum achievable CWTFM "
                                 "coefficient and an equal or lower mean priority. Abort criteria not met. Continuing")
@@ -616,16 +623,16 @@ class Listen(threading.Thread):
 
         # if message contains final target source_id,
         key_glob = ('{}:*:{}'.format(product_id, 'targets'))
+        proc_start_time = get_redis_key(self.redis_server, "{}:current_obs:proc_start_time".format(product_id))
         for k in self.redis_server.scan_iter(key_glob):
             q = get_redis_key(self.redis_server, k)
-            if get_redis_key(self.redis_server, "{}:current_obs:proc_start_time".format(product_id)) is None\
-                    and self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
+            if proc_start_time is None and self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
                 # all sources have been received by the processing nodes
                 # begin processing time
                 logger.info("Receipt of all targets confirmed by processing nodes")
-                proc_start_time = datetime.now()
                 write_pair_redis(self.redis_server,
-                                 "{}:current_obs:proc_start_time".format(product_id), str(proc_start_time))
+                                 "{}:current_obs:proc_start_time".format(product_id),
+                                 str(datetime.now()))
 
     """
 
@@ -652,9 +659,9 @@ class Listen(threading.Thread):
         if (not fraction_processed) and (not observation_time):
             # processing aborted based on priority of new sources & optimising CWTFM values
             # (CWTFM is proportional to d^2 / N_stars ; smaller = better)
-            logger.info("New pointing contains sources with a lower minimum achievable CWTFM coefficient, and an equal "
+            logger.info("New pointing contains sources with a lower minimum achievable CWTFM parameter, and an equal "
                         "or lower mean priority. Aborting")
-            self._deconfigure(product_id)
+            # self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info("Processing state set to \'ready\'")
 
@@ -693,14 +700,18 @@ class Listen(threading.Thread):
         targets_to_process = df.transpose()
         return targets_to_process
 
-    def coord_error(self, coords, frequency):
+    def coord_error(self, product_id, coords, frequency, mode):
         """Function to handle errors due to coordinate values (empty pointings or out of range)
 
         Parameters:
+            product_id: (str)
+                subarray ID
             coords: (str)
                 string to parse containing erroneous coordinates
             frequency: (str)
                 the central frequency of observation
+            mode: (str)
+                current_obs or new_obs, the keys concerning erroneous or unavailable coordinates, to be deleted
 
         Returns:
             None
@@ -714,7 +725,13 @@ class Listen(threading.Thread):
             logger.info('No targets visible for coordinates ({}) at {} Hz. Waiting for new coordinates'
                         .format(coords, frequency))
 
-        pStatus.proc_status = "ready"
+        # DELETE mode:target_list redis key
+        target_key = ('{}:{}:target_list'.format(product_id, mode))
+        if mode == "new_obs" and "None" not in str(self._get_sensor_value(product_id, "{}:target_list".format(mode))):
+            delete_key(self.redis_server, target_key)
+
+        if mode == "current_obs":
+            pStatus.proc_status = "ready"
 
     def round_time(self, timestamp):
         """Function to round timestamp values to nearest second for database matching

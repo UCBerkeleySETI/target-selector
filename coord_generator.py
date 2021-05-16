@@ -101,8 +101,8 @@ with open('random_seed.csv') as f:
                 if final_messages[i+4].endswith('True'):
                     print(chnls[i], final_messages[i])
                     r.publish(chnls[i], final_messages[i])
-                    print("Observing for 20 seconds...")
-                    time.sleep(20)
+                    print("Observing for 5 seconds...")
+                    time.sleep(5)
             elif final_messages[i+1].startswith('deconfigure'):
                 try:
                     key_glob = '*:*:targets'
@@ -124,10 +124,12 @@ with open('random_seed.csv') as f:
                         for s in targetsFinal['source_id']:
                             publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
                             print('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
+                            time.sleep(0.05)
                         time.sleep(15)
                         for s in targetsFinal['source_id']:
                             publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
                             print('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
+                            time.sleep(0.05)
                 except TypeError:  # array_1:pointing_0:targets empty (NoneType)
                     pass
                 except Exception as k:
