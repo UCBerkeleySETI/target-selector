@@ -202,16 +202,7 @@ class Listen(threading.Thread):
                                                                                              "{}:frequency"
                                                                                              .format(mode))),
                                            check_flag=check_flag)
-                targets_dist = targets.sort_values('dist_c', ignore_index=True)
-                # create empty array for TBDFM parameter values in the target list
-                # TBDFM = To Be Determined Figure of Merit; = (N_sources)^-(priority)
-                tbdfm_param = np.full(targets_dist.shape[0], 0, dtype=float)
-                # fill this array with the (N_sources)^-(priority) value for each row
-                tbdfm_param[targets_dist.index] = np.float_power((targets_dist.index + 1), -(targets_dist['priority']))
-                # append this array to the target list dataframe
-                targets_dist['tbdfm_param'] = tbdfm_param
-                targets_dist.sort_values(by=['priority', 'dist_c'], ignore_index=True)
-                targets_table = pd.DataFrame.to_csv(targets_dist)
+                targets_table = pd.DataFrame.to_csv(targets)
 
                 if len(targets.index) == 0:
                     self.coord_error(coords=self._get_sensor_value(product_id, "{}:coords".format(mode)),
@@ -323,29 +314,33 @@ class Listen(threading.Thread):
                 new_target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                               "new_obs:target_list")), sep=",",
                                               index_col=0)
+                appended_new = self.append_tbdfm(new_target_list)
 
                 # read in and format list of targets which remain to be processed from redis key to dataframe
                 remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                                    "current_obs:remaining_to_process")),
                                                    sep=",", index_col=0)
+                appended_remaining = self.append_tbdfm(remaining_to_process)
 
                 # minimum achievable TBDFM parameter for sources in the new target list
-                min_new_tbdfm = new_target_list['tbdfm_param'].min()
+                min_new_tbdfm = appended_new['tbdfm_param'].min()
                 # number of sources in the new target list
-                n_new_obs = len(new_target_list.index)
+                n_new_obs = len(appended_new.index)
 
-                min_new_tbdfm_prio = new_target_list.loc[new_target_list['tbdfm_param']
-                                                         == min_new_tbdfm]['priority'].item()
-                min_new_tbdfm_num = int(np.float_power(min_new_tbdfm, -(1 / min_new_tbdfm_prio)))
+                min_new_tbdfm_prio = appended_new.loc[appended_new['tbdfm_param']
+                                                      == min_new_tbdfm]['priority'].item()
+                min_new_tbdfm_num = appended_new.loc[appended_new['tbdfm_param']
+                                                     == min_new_tbdfm].index.values[0]+1
 
                 # minimum achievable TBDFM parameter for sources remaining to process
-                min_remaining_tbdfm = remaining_to_process['tbdfm_param'].min()
+                min_remaining_tbdfm = appended_remaining['tbdfm_param'].min()
                 # number of sources remaining to process
-                n_remaining_obs = len(remaining_to_process.index)
+                n_remaining_obs = len(appended_remaining.index)
 
-                min_remaining_tbdfm_prio = remaining_to_process.loc[remaining_to_process['tbdfm_param']
-                                                                    == min_remaining_tbdfm]['priority'].item()
-                min_remaining_tbdfm_num = int(np.float_power(min_remaining_tbdfm, -(1 / min_remaining_tbdfm_prio)))
+                min_remaining_tbdfm_prio = appended_remaining.loc[appended_remaining['tbdfm_param']
+                                                                  == min_remaining_tbdfm]['priority'].item()
+                min_remaining_tbdfm_num = appended_remaining.loc[appended_remaining['tbdfm_param']
+                                                                 == min_remaining_tbdfm].index.values[0]+1
 
                 logger.info("Minimum TBDFM parameter (N_sources)^-(priority) for {} targets in new pointing: "
                             "{} ** -{} = {}"
@@ -621,6 +616,27 @@ class Listen(threading.Thread):
     Internal Methods
 
     """
+
+    def append_tbdfm(self, table):
+        """Function to calculate and append TBDFM values to tables containing targets for both the new pointing and
+        those currently remaining process
+
+        Parameters:
+            table: (dataframe)
+                Table from which to calculate TBDFM and to which the values are appended
+        Returns:
+            targets_dist: (dataframe)
+                Dataframe with appended TBDFM values for each row
+        """
+        # create empty array for TBDFM parameter values in the target list
+        # TBDFM = To Be Determined Figure of Merit; = (N_sources)^-(priority)
+        tbdfm_param = np.full(table.shape[0], 0, dtype=float)
+        # fill this array with the (N_sources)^-(priority) value for each row
+        targets_dist = table.sort_values('dist_c', ignore_index=True)
+        tbdfm_param[targets_dist.index] = np.float_power((targets_dist.index + 1), -(targets_dist['priority']))
+        # append this array to the target list dataframe
+        targets_dist['tbdfm_param'] = tbdfm_param
+        return targets_dist
 
     def abort_criteria(self, product_id, time_elapsed=None, observation_time=None, fraction_processed=None):
         """Function to abort processing if certain conditions are met
