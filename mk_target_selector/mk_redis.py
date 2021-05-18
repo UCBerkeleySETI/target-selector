@@ -203,12 +203,13 @@ class Listen(threading.Thread):
                                                                                              .format(mode))),
                                            check_flag=check_flag)
                 targets_dist = targets.sort_values('dist_c', ignore_index=True)
-                # create empty array for CWTFM parameter values in the target list
-                cwtfm_param = np.full(targets_dist.shape[0], 0, dtype=float)
-                # fill this array with the (d^2 / N_sources) value for each row
-                cwtfm_param[targets_dist.index] = (targets_dist['dist_c'])**2 / (targets_dist.index + 1)
+                # create empty array for TBDFM parameter values in the target list
+                # TBDFM = To Be Determined Figure of Merit; = (N_sources)**-(priority)
+                tbdfm_param = np.full(targets_dist.shape[0], 0, dtype=float)
+                # fill this array with the (N_sources)**-(priority) value for each row
+                tbdfm_param[targets_dist.index] = np.float_power((targets_dist.index + 1), -(targets_dist['priority']))
                 # append this array to the target list dataframe
-                targets_dist['cwtfm_param'] = cwtfm_param
+                targets_dist['tbdfm_param'] = tbdfm_param
                 targets_dist.sort_values(by=['priority', 'dist_c'], ignore_index=True)
                 targets_table = pd.DataFrame.to_csv(targets_dist)
 
@@ -328,53 +329,59 @@ class Listen(threading.Thread):
                                                                                    "current_obs:remaining_to_process")),
                                                    sep=",", index_col=0)
 
-                # minimum achievable CWTFM parameter for sources in the new target list
-                min_new_cwtfm = new_target_list['cwtfm_param'].min()
+                # minimum achievable TBDFM parameter for sources in the new target list
+                min_new_tbdfm = new_target_list['tbdfm_param'].min()
                 # number of sources in the new target list
                 n_new_obs = len(new_target_list.index)
-                # distance at which minimum CWTFM parameter is achieved for the new target list
-                new_cwtfm_dist = new_target_list.loc[new_target_list['cwtfm_param']
-                                                     == min_new_cwtfm]['dist_c'].item()
+                # distance at which minimum TBDFM parameter is achieved for the new target list
+                # new_tbdfm_dist = new_target_list.loc[new_target_list['tbdfm_param']
+                #                                      == min_new_tbdfm]['dist_c'].item()
                 # number of sources within this distance in the new target list
-                n_new_dist = len(new_target_list.loc[new_target_list['dist_c']
-                                                     <= new_cwtfm_dist].index)
-                # priority at which minimum CWTFM parameter is achieved for the new target list
-                new_cwtfm_prio = new_target_list.loc[new_target_list['cwtfm_param']
-                                                     == min_new_cwtfm]['priority'].item()
+                # n_new_dist = len(new_target_list.loc[new_target_list['dist_c']
+                #                                      <= new_tbdfm_dist].index)
+                # priority at which minimum TBDFM parameter is achieved for the new target list
+                # new_tbdfm_prio = new_target_list.loc[new_target_list['tbdfm_param']
+                #                                      == min_new_tbdfm]['priority'].item()
                 # mean priority of sources within this distance in the new target list
-                mean_new_priority = new_target_list.loc[new_target_list['dist_c']
-                                                        <= new_cwtfm_dist]['priority'].mean()
+                # mean_new_priority = new_target_list.loc[new_target_list['dist_c']
+                #                                         <= new_tbdfm_dist]['priority'].mean()
 
-                # minimum achievable CWTFM parameter for sources remaining to process
-                min_remaining_cwtfm = remaining_to_process['cwtfm_param'].min()
+                # minimum achievable TBDFM parameter for sources remaining to process
+                min_remaining_tbdfm = remaining_to_process['tbdfm_param'].min()
                 # number of sources remaining to process
                 n_remaining_obs = len(remaining_to_process.index)
-                # distance at which minimum CWTFM parameter is achieved for the sources remaining to process
-                remaining_cwtfm_dist = remaining_to_process.loc[remaining_to_process['cwtfm_param']
-                                                                == min_remaining_cwtfm]['dist_c'].item()
+                # distance at which minimum TBDFM parameter is achieved for the sources remaining to process
+                # remaining_tbdfm_dist = remaining_to_process.loc[remaining_to_process['tbdfm_param']
+                #                                                 == min_remaining_tbdfm]['dist_c'].item()
                 # number of sources remaining to process within this distance
-                n_rem_dist = len(remaining_to_process.loc[remaining_to_process['dist_c']
-                                                          <= remaining_cwtfm_dist].index)
-                # priority at which minimum CWTFM parameter is achieved for the sources remaining to process
-                remaining_cwtfm_prio = remaining_to_process.loc[remaining_to_process['cwtfm_param']
-                                                                == min_remaining_cwtfm]['priority'].item()
+                # n_rem_dist = len(remaining_to_process.loc[remaining_to_process['dist_c']
+                #                                           <= remaining_tbdfm_dist].index)
+                # priority at which minimum TBDFM parameter is achieved for the sources remaining to process
+                # remaining_tbdfm_prio = remaining_to_process.loc[remaining_to_process['tbdfm_param']
+                #                                                 == min_remaining_tbdfm]['priority'].item()
                 # mean priority of sources remaining to process within this distance
-                mean_remaining_priority = remaining_to_process.loc[remaining_to_process['dist_c']
-                                                                   <= remaining_cwtfm_dist]['priority'].mean()
+                # mean_remaining_priority = remaining_to_process.loc[remaining_to_process['dist_c']
+                #                                                    <= remaining_tbdfm_dist]['priority'].mean()
 
-                logger.info("Minimum CWTFM parameter (d^2 / N_sources) for {} targets in new pointing:"
-                            " {} at {} pc, priority {}"
-                            .format(n_new_obs, min_new_cwtfm, new_cwtfm_dist, new_cwtfm_prio))
-                logger.info("{} targets in new pointing within {} pc, with a mean priority of {}"
-                            .format(n_new_dist, new_cwtfm_dist, mean_new_priority))
+                # logger.info("Minimum TBDFM parameter (d^2 / N_sources) for {} targets in new pointing:"
+                #             " {} at {} pc, priority {}"
+                #             .format(n_new_obs, min_new_tbdfm, new_tbdfm_dist, new_tbdfm_prio))
+                # logger.info("{} targets in new pointing within {} pc, with a mean priority of {}"
+                #             .format(n_new_dist, new_tbdfm_dist, mean_new_priority))
+                #
+                # logger.info("Minimum TBDFM parameter (d^2 / N_sources) for {} targets remaining to process:"
+                #             " {} at {} pc, priority {}"
+                #             .format(n_remaining_obs, min_remaining_tbdfm, remaining_tbdfm_dist, remaining_tbdfm_prio))
+                # logger.info("{} targets remaining to process within {} pc, with a mean priority of {}"
+                #             .format(n_rem_dist, remaining_tbdfm_dist, mean_remaining_priority))
 
-                logger.info("Minimum CWTFM parameter (d^2 / N_sources) for {} targets remaining to process:"
-                            " {} at {} pc, priority {}"
-                            .format(n_remaining_obs, min_remaining_cwtfm, remaining_cwtfm_dist, remaining_cwtfm_prio))
-                logger.info("{} targets remaining to process within {} pc, with a mean priority of {}"
-                            .format(n_rem_dist, remaining_cwtfm_dist, mean_remaining_priority))
+                logger.info("Minimum TBDFM parameter (N_sources)**-(priority) for {} targets in new pointing: {}"
+                            .format(n_new_obs, min_new_tbdfm))
+                logger.info("Minimum TBDFM parameter (N_sources)**-(priority) for {} targets remaining to process: {}"
+                            .format(n_remaining_obs, min_remaining_tbdfm))
 
-                if (min_new_cwtfm < min_remaining_cwtfm) and (mean_new_priority <= mean_remaining_priority):
+                # if (min_new_tbdfm < min_remaining_tbdfm) and (mean_new_priority <= mean_remaining_priority):
+                if min_new_tbdfm < min_remaining_tbdfm:
                     self.abort_criteria(product_id)
                     self.fetch_data(product_id, mode="current_obs")
                     if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
@@ -394,10 +401,11 @@ class Listen(threading.Thread):
 
                         self._publish_targets(targets_to_publish, product_id, sub_arr_id)
 
-                elif (min_new_cwtfm >= min_remaining_cwtfm) \
-                        or (mean_new_priority > mean_remaining_priority):
-                    logger.info("New pointing does not contain sources with a lower minimum achievable CWTFM "
-                                "coefficient and an equal or lower mean priority. Abort criteria not met. Continuing")
+                # elif (min_new_tbdfm >= min_remaining_tbdfm) \
+                #         or (mean_new_priority > mean_remaining_priority):
+                elif min_new_tbdfm >= min_remaining_tbdfm:
+                    logger.info("New pointing does not contain sources with a lower minimum achievable TBDFM "
+                                "parameter. Abort criteria not met. Continuing")
                     pass
 
     def _capture_stop(self, message):
@@ -657,10 +665,9 @@ class Listen(threading.Thread):
             None
         """
         if (not fraction_processed) and (not observation_time):
-            # processing aborted based on priority of new sources & optimising CWTFM values
-            # (CWTFM is proportional to d^2 / N_stars ; smaller = better)
-            logger.info("New pointing contains sources with a lower minimum achievable CWTFM parameter, and an equal "
-                        "or lower mean priority. Aborting")
+            # processing aborted based on priority of new sources & optimising TBDFM values
+            # (smaller TBDFM = better)
+            logger.info("New pointing contains sources with a lower minimum achievable TBDFM parameter. Aborting")
             # self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info("Processing state set to \'ready\'")
@@ -668,7 +675,7 @@ class Listen(threading.Thread):
         elif not fraction_processed:  # processing aborted based on observation time (t_obs)
             if (time_elapsed > 1200) and (time_elapsed > (2 * observation_time) - 300):
                 logger.info("Processing time has exceeded both 20 and (2t_obs - 5) minutes."
-                            " Aborting processing of current pointing")
+                            " Aborting")
                 self._deconfigure(product_id)
                 pStatus.proc_status = "ready"
                 logger.info("Processing state set to \'ready\'")
@@ -676,7 +683,7 @@ class Listen(threading.Thread):
         elif not observation_time:  # processing aborted based on absolute processing time
             if (fraction_processed > 0.9) and (time_elapsed > 600):
                 logger.info("Processing time has exceeded 10 minutes, with >90% of targets processed successfully."
-                            " Aborting processing of current pointing")
+                            " Aborting")
                 self._deconfigure(product_id)
                 pStatus.proc_status = "ready"
                 logger.info("Processing state set to \'ready\'")
