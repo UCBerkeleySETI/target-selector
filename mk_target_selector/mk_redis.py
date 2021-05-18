@@ -342,11 +342,11 @@ class Listen(threading.Thread):
                 min_remaining_tbdfm_num = appended_remaining.loc[appended_remaining['tbdfm_param']
                                                                  == min_remaining_tbdfm].index.values[0]+1
 
-                logger.info("Minimum TBDFM parameter (N_sources)^-(priority) for {} targets in new pointing: "
-                            "{} ** -{} = {}"
+                logger.info("Minimum TBDFM parameter (N_sources)^-(1/priority) for {} targets in new pointing: "
+                            "{} ** -1/{} = {}"
                             .format(n_new_obs, min_new_tbdfm_num, min_new_tbdfm_prio, min_new_tbdfm))
-                logger.info("Minimum TBDFM parameter (N_sources)^-(priority) for {} targets remaining to process: "
-                            "{} ** -{} = {}"
+                logger.info("Minimum TBDFM parameter (N_sources)^-(1/priority) for {} targets remaining to process: "
+                            "{} ** -1/{} = {}"
                             .format(n_remaining_obs, min_remaining_tbdfm_num, min_remaining_tbdfm_prio, min_remaining_tbdfm))
 
                 # if (min_new_tbdfm < min_remaining_tbdfm) and (mean_new_priority <= mean_remaining_priority):
@@ -621,6 +621,8 @@ class Listen(threading.Thread):
         """Function to calculate and append TBDFM values to tables containing targets for both the new pointing and
         those currently remaining process
 
+        TBDFM = To Be Determined Figure of Merit; = (N_sources)^-(1/priority)
+
         Parameters:
             table: (dataframe)
                 Table from which to calculate TBDFM and to which the values are appended
@@ -629,11 +631,10 @@ class Listen(threading.Thread):
                 Dataframe with appended TBDFM values for each row
         """
         # create empty array for TBDFM parameter values in the target list
-        # TBDFM = To Be Determined Figure of Merit; = (N_sources)^-(priority)
         tbdfm_param = np.full(table.shape[0], 0, dtype=float)
         # fill this array with the (N_sources)^-(priority) value for each row
         targets_dist = table.sort_values('dist_c', ignore_index=True)
-        tbdfm_param[targets_dist.index] = np.float_power((targets_dist.index + 1), -(targets_dist['priority']))
+        tbdfm_param[targets_dist.index] = np.float_power((targets_dist.index + 1), -(1/targets_dist['priority']))
         # append this array to the target list dataframe
         targets_dist['tbdfm_param'] = tbdfm_param
         return targets_dist
