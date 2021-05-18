@@ -204,9 +204,9 @@ class Listen(threading.Thread):
                                            check_flag=check_flag)
                 targets_dist = targets.sort_values('dist_c', ignore_index=True)
                 # create empty array for TBDFM parameter values in the target list
-                # TBDFM = To Be Determined Figure of Merit; = (N_sources)**-(priority)
+                # TBDFM = To Be Determined Figure of Merit; = (N_sources)^-(priority)
                 tbdfm_param = np.full(targets_dist.shape[0], 0, dtype=float)
-                # fill this array with the (N_sources)**-(priority) value for each row
+                # fill this array with the (N_sources)^-(priority) value for each row
                 tbdfm_param[targets_dist.index] = np.float_power((targets_dist.index + 1), -(targets_dist['priority']))
                 # append this array to the target list dataframe
                 targets_dist['tbdfm_param'] = tbdfm_param
@@ -333,52 +333,26 @@ class Listen(threading.Thread):
                 min_new_tbdfm = new_target_list['tbdfm_param'].min()
                 # number of sources in the new target list
                 n_new_obs = len(new_target_list.index)
-                # distance at which minimum TBDFM parameter is achieved for the new target list
-                # new_tbdfm_dist = new_target_list.loc[new_target_list['tbdfm_param']
-                #                                      == min_new_tbdfm]['dist_c'].item()
-                # number of sources within this distance in the new target list
-                # n_new_dist = len(new_target_list.loc[new_target_list['dist_c']
-                #                                      <= new_tbdfm_dist].index)
-                # priority at which minimum TBDFM parameter is achieved for the new target list
-                # new_tbdfm_prio = new_target_list.loc[new_target_list['tbdfm_param']
-                #                                      == min_new_tbdfm]['priority'].item()
-                # mean priority of sources within this distance in the new target list
-                # mean_new_priority = new_target_list.loc[new_target_list['dist_c']
-                #                                         <= new_tbdfm_dist]['priority'].mean()
+
+                min_new_tbdfm_prio = new_target_list.loc[new_target_list['tbdfm_param']
+                                                         == min_new_tbdfm]['priority'].item()
+                min_new_tbdfm_num = int(np.float_power(min_new_tbdfm, -(1 / min_new_tbdfm_prio)))
 
                 # minimum achievable TBDFM parameter for sources remaining to process
                 min_remaining_tbdfm = remaining_to_process['tbdfm_param'].min()
                 # number of sources remaining to process
                 n_remaining_obs = len(remaining_to_process.index)
-                # distance at which minimum TBDFM parameter is achieved for the sources remaining to process
-                # remaining_tbdfm_dist = remaining_to_process.loc[remaining_to_process['tbdfm_param']
-                #                                                 == min_remaining_tbdfm]['dist_c'].item()
-                # number of sources remaining to process within this distance
-                # n_rem_dist = len(remaining_to_process.loc[remaining_to_process['dist_c']
-                #                                           <= remaining_tbdfm_dist].index)
-                # priority at which minimum TBDFM parameter is achieved for the sources remaining to process
-                # remaining_tbdfm_prio = remaining_to_process.loc[remaining_to_process['tbdfm_param']
-                #                                                 == min_remaining_tbdfm]['priority'].item()
-                # mean priority of sources remaining to process within this distance
-                # mean_remaining_priority = remaining_to_process.loc[remaining_to_process['dist_c']
-                #                                                    <= remaining_tbdfm_dist]['priority'].mean()
 
-                # logger.info("Minimum TBDFM parameter (d^2 / N_sources) for {} targets in new pointing:"
-                #             " {} at {} pc, priority {}"
-                #             .format(n_new_obs, min_new_tbdfm, new_tbdfm_dist, new_tbdfm_prio))
-                # logger.info("{} targets in new pointing within {} pc, with a mean priority of {}"
-                #             .format(n_new_dist, new_tbdfm_dist, mean_new_priority))
-                #
-                # logger.info("Minimum TBDFM parameter (d^2 / N_sources) for {} targets remaining to process:"
-                #             " {} at {} pc, priority {}"
-                #             .format(n_remaining_obs, min_remaining_tbdfm, remaining_tbdfm_dist, remaining_tbdfm_prio))
-                # logger.info("{} targets remaining to process within {} pc, with a mean priority of {}"
-                #             .format(n_rem_dist, remaining_tbdfm_dist, mean_remaining_priority))
+                min_remaining_tbdfm_prio = remaining_to_process.loc[remaining_to_process['tbdfm_param']
+                                                                    == min_remaining_tbdfm]['priority'].item()
+                min_remaining_tbdfm_num = int(np.float_power(min_remaining_tbdfm, -(1 / min_remaining_tbdfm_prio)))
 
-                logger.info("Minimum TBDFM parameter (N_sources)**-(priority) for {} targets in new pointing: {}"
-                            .format(n_new_obs, min_new_tbdfm))
-                logger.info("Minimum TBDFM parameter (N_sources)**-(priority) for {} targets remaining to process: {}"
-                            .format(n_remaining_obs, min_remaining_tbdfm))
+                logger.info("Minimum TBDFM parameter (N_sources)^-(priority) for {} targets in new pointing: "
+                            "{} ** -{} = {}"
+                            .format(n_new_obs, min_new_tbdfm_num, min_new_tbdfm_prio, min_new_tbdfm))
+                logger.info("Minimum TBDFM parameter (N_sources)^-(priority) for {} targets remaining to process: "
+                            "{} ** -{} = {}"
+                            .format(n_remaining_obs, min_remaining_tbdfm_num, min_remaining_tbdfm_prio, min_remaining_tbdfm))
 
                 # if (min_new_tbdfm < min_remaining_tbdfm) and (mean_new_priority <= mean_remaining_priority):
                 if min_new_tbdfm < min_remaining_tbdfm:
