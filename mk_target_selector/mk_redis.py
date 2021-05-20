@@ -147,7 +147,7 @@ class Listen(threading.Thread):
                 observation_time = (datetime.strptime(obs_end_time, "%Y-%m-%d %H:%M:%S.%f")
                                     - datetime.strptime(obs_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
 
-                self.abort_criteria(product_id, time_elapsed, observation_time)
+                # self.abort_criteria(product_id, time_elapsed, observation_time)
 
     def fetch_data(self, product_id, mode):
         """Fetches telescope status data and select targets if and when
@@ -175,19 +175,20 @@ class Listen(threading.Thread):
                 new_pool = self._get_sensor_value(product_id, "new_obs:pool_resources")
 
                 if mode == "current_obs":
-                    logger.info("Writing values of [{}:new_obs:*] to [{}:current_obs:*]".format(product_id, product_id))
+                    # logger.info("Writing values of [{}:new_obs:*] to [{}:current_obs:*]"
+                    #             .format(product_id, product_id))
                     write_pair_redis(self.redis_server, "{}:{}:coords".format(product_id, mode), new_coords)
-                    logger.info("Fetched [{}:{}:coords]: [{}]"
-                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:coords"
-                                                                                 .format(mode))))
+                    # logger.info("Fetched [{}:{}:coords]: [{}]"
+                    #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:coords"
+                    #                                                              .format(mode))))
                     write_pair_redis(self.redis_server, "{}:{}:frequency".format(product_id, mode), new_freq)
-                    logger.info("Fetched [{}:{}:frequency]: [{}]"
-                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:frequency"
-                                                                                 .format(mode))))
+                    # logger.info("Fetched [{}:{}:frequency]: [{}]"
+                    #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:frequency"
+                    #                                                              .format(mode))))
                     write_pair_redis(self.redis_server, "{}:{}:pool_resources".format(product_id, mode), new_pool)
-                    logger.info("Fetched [{}:{}:pool_resources]: [{}]"
-                                .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources"
-                                                                                 .format(mode))))
+                    # logger.info("Fetched [{}:{}:pool_resources]: [{}]"
+                    #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources"
+                    #                                                              .format(mode))))
 
                 check_flag = False
                 if mode == "current_obs":
@@ -261,6 +262,7 @@ class Listen(threading.Thread):
             new_obs_key_glob = ("{}:new_obs:*".format(product_id))
             current_key_glob = ("{}:current_obs:*".format(product_id))
             for a in self.redis_server.scan_iter(key_glob):
+                # logger.info("Key: {}".format(get_redis_key(self.redis_server, a)))
                 logger.info('Removing key: {}'.format(a))
                 delete_key(self.redis_server, a)
             for b in self.redis_server.scan_iter(success_key_glob):
@@ -297,8 +299,8 @@ class Listen(threading.Thread):
                 pulled_freq = self.engine.freq_format(self._get_sensor_value(product_id, "current_obs:frequency"))
 
                 targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
-                logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
-                                                                              pulled_freq, targets_to_publish))
+                # logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
+                #                                                               pulled_freq, targets_to_publish))
 
                 obs_start_time = datetime.now()
                 write_pair_redis(self.redis_server,
@@ -316,14 +318,19 @@ class Listen(threading.Thread):
                                                                               "new_obs:target_list")), sep=",",
                                               index_col=0)
                 appended_new = self.append_tbdfm(new_target_list)
-                # logger.info("appended_new:\n{}".format(appended_new))
+                # with pd.option_context('display.max_rows', None):
+                #     logger.info("appended_new:\n\n{}\n"
+                #                 .format(appended_new.drop(labels=['project', 'table_name'], axis=1)))
 
                 # read in and format list of targets which remain to be processed from redis key to dataframe
                 remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                                    "current_obs:remaining_to_process")),
                                                    sep=",", index_col=0)
+                # logger.info("remaining_to_process:\n\n{}\n".format(remaining_to_process))
                 appended_remaining = self.append_tbdfm(remaining_to_process)
-                # logger.info("appended_remaining:\n{}".format(appended_remaining))
+                # with pd.option_context('display.max_rows', None):
+                #     logger.info("appended_remaining:\n\n{}\n"
+                #                 .format(appended_remaining.drop(labels=['project', 'table_name'], axis=1)))
 
                 # maximum achievable TBDFM parameter for sources in the new target list
                 max_new_tbdfm = appended_new['tbdfm_param'].max()
@@ -366,8 +373,8 @@ class Listen(threading.Thread):
                             self._get_sensor_value(product_id, "current_obs:frequency"))
 
                         targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
-                        logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
-                                                                                      pulled_freq, targets_to_publish))
+                        # logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
+                        #                                                               pulled_freq, targets_to_publish))
 
                         obs_start_time = datetime.now()
                         write_pair_redis(self.redis_server,
@@ -467,7 +474,7 @@ class Listen(threading.Thread):
             coord_key = "{}:new_obs:coords".format(product_id)
             coord_value = "{}, {}".format(coords.ra.deg, coords.dec.deg)
             write_pair_redis(self.redis_server, coord_key, coord_value)
-            logger.info("Wrote [{}] to [{}]".format(coord_value, coord_key))
+            # logger.info("Wrote [{}] to [{}]".format(coord_value, coord_key))
 
     def _schedule_blocks(self, key, target_pointing, beam_rad):
         """Block that responds to schedule block updates. Searches for targets
@@ -523,7 +530,7 @@ class Listen(threading.Thread):
 
         pool_resources_key = "{}:new_obs:pool_resources".format(product_id)
         write_pair_redis(self.redis_server, pool_resources_key, pool_resources_value)
-        logger.info("Wrote [{}] to [{}]".format(pool_resources_value, pool_resources_key))
+        # logger.info("Wrote [{}] to [{}]".format(pool_resources_value, pool_resources_key))
 
     def _frequency(self, message):
         """Response to a frequency message from the sensor_alerts channel.
@@ -543,7 +550,7 @@ class Listen(threading.Thread):
 
         frequency_key = "{}:new_obs:frequency".format(product_id)
         write_pair_redis(self.redis_server, frequency_key, frequency_value)
-        logger.info("Wrote [{}] to [{}]".format(frequency_value, frequency_key))
+        # logger.info("Wrote [{}] to [{}]".format(frequency_value, frequency_key))
 
     def _processing_success(self, message):
         """Response to a successful processing success message from the sensor_alerts channel.
@@ -567,20 +574,26 @@ class Listen(threading.Thread):
                                                           (product_id, "current_obs:obs_start_time"))),
                                       processed='TRUE')
 
-        target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
-                                                                  "current_obs:target_list")), sep=",", index_col=0)
+        target_list = pd.read_csv(
+            StringIO(
+                self._get_sensor_value(product_id, "current_obs:target_list")), sep=",", index_col=0)
+
         number_to_process = len(target_list.index)
         number_processed = target_list[target_list['source_id'] == float(source_id)].index.values[0]+1
         fraction_processed = number_processed / number_to_process
 
-        remaining_to_process = pd.DataFrame.to_csv(target_list.drop(
-            target_list[target_list.index < number_processed - 1].index))
+        remaining_list = pd.read_csv(
+            StringIO(
+                self._get_sensor_value(product_id, "current_obs:remaining_to_process")), sep=",", index_col=0)
+
+        remaining_to_process = pd.DataFrame.to_csv(remaining_list[remaining_list.source_id != float(source_id)]
+                                                   .reset_index(drop=True))
 
         write_pair_redis(self.redis_server,
                          "{}:current_obs:remaining_to_process".format(product_id), remaining_to_process)
 
-        proc_start_time = self._get_sensor_value(product_id, "current_obs:proc_start_time")
-        time_elapsed = (datetime.now() - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
+        # proc_start_time = self._get_sensor_value(product_id, "current_obs:proc_start_time")
+        # time_elapsed = (datetime.now() - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
 
         if number_processed == number_to_process:
             logger.info("Confirmation of successful processing of all sources received from processing nodes")
@@ -588,7 +601,7 @@ class Listen(threading.Thread):
             pStatus.proc_status = "ready"
             logger.info("Processing state set to \'ready\'")
 
-        self.abort_criteria(product_id, time_elapsed, fraction_processed)
+        # self.abort_criteria(product_id, time_elapsed, fraction_processed)
 
     def _acknowledge(self, message):
         """Response to a successful acknowledgement message from the sensor_alerts channel.
@@ -605,10 +618,10 @@ class Listen(threading.Thread):
 
         # if message contains final target source_id,
         key_glob = ('{}:*:{}'.format(product_id, 'targets'))
-        proc_start_time = get_redis_key(self.redis_server, "{}:current_obs:proc_start_time".format(product_id))
+
         for k in self.redis_server.scan_iter(key_glob):
             q = get_redis_key(self.redis_server, k)
-            if proc_start_time is None and self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
+            if self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
                 # all sources have been received by the processing nodes
                 # begin processing time
                 logger.info("Receipt of all targets confirmed by processing nodes")

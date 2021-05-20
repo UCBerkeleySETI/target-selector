@@ -319,7 +319,7 @@ class Triage(DatabaseHandler):
 
         query = """
                 SELECT source_id, antennas, n_antennas, bands, processed, max(duration) AS duration
-                FROM {} 
+                FROM {}
                 GROUP BY source_id, antennas, n_antennas, bands, processed
                 """.format(table)
 
@@ -411,8 +411,8 @@ class Triage(DatabaseHandler):
                 """.format(mask=mask, c_ra=c_ra,
                            c_dec=c_dec, beam_rad=beam_rad)
 
-        if not check_flag:
-            logger.info('Query:\n {}\n'.format(query))
+        # if not check_flag:
+        #     logger.info('Query:\n {}\n'.format(query))
 
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con=self.conn)

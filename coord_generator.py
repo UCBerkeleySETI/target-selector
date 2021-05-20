@@ -105,31 +105,25 @@ with open('random_seed.csv') as f:
                     time.sleep(5)
             elif final_messages[i+1].startswith('deconfigure'):
                 try:
-                    key_glob = '*:*:targets'
-                    # for k in r.scan_iter(key_glob):
-                    #     time.sleep(15)
-                    #     product_id = (str(k)[1:].replace("\'", "")).split(':')[0]
-                    #     targets = str(r.get(k), 'utf-8')
-                    #     w = targets.replace("\"", "")
-                    #     e = w.replace(":", ",")
-                    #     t = e.replace("[", "")
-                    #     y = t.replace("], ", "\n")
-                    #     u = y.replace("]", "")
-                    #     o = u.replace("{", "")
-                    #     p = o.replace("}", "")
-                    #     data = StringIO(p)
-                    #     df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
-                    #     targetsFinal = df.transpose()
-                    #     # print("\n",targetsFinal)
-                    #     for s in targetsFinal['source_id']:
-                    #         publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
-                    #         print('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
-                    #         time.sleep(0.05)
-                    #     time.sleep(15)
-                    #     for s in targetsFinal['source_id']:
-                    #         publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
-                    #         print('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
-                    #         time.sleep(0.05)
+                    key_glob = '*:*:remaining_to_process'
+                    for k in r.scan_iter(key_glob):
+                        time.sleep(5)
+                        product_id = (str(k)[1:].replace("\'", "")).split(':')[0]
+                        targets = str(r.get(k), 'utf-8')
+                        data = pd.read_csv(
+                            StringIO(targets), sep=",", index_col=0)
+                        print("\n{}\n".format(data))
+                        # df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
+                        # targetsFinal = df.transpose()
+                        # print("\n",targetsFinal)
+                        for s in data['source_id']:
+                            publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
+                            print('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
+                            time.sleep(0.05)
+                        for s in data.head(64)['source_id']:
+                            publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
+                            print('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
+                            time.sleep(0.05)
                 except TypeError:  # array_1:pointing_0:targets empty (NoneType)
                     pass
                 except Exception as k:
@@ -139,10 +133,10 @@ with open('random_seed.csv') as f:
                 r.publish(chnls[i], final_messages[i])
                 time.sleep(0.05)
             elif final_messages[i].startswith('deconfigure'):
-                time.sleep(5)
+                time.sleep(1)
                 print(chnls[i], final_messages[i])
                 r.publish(chnls[i], final_messages[i])
-                time.sleep(5)
+                time.sleep(1)
             else:
                 print(chnls[i], final_messages[i])
                 r.publish(chnls[i], final_messages[i])
