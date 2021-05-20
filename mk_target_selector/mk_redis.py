@@ -944,7 +944,7 @@ class Listen(threading.Thread):
         write_pair_redis(self.redis_server, key_current_obs, to_process)
         publish(self.redis_server, channel, key)
 
-        logger.info('Targets published to {}'.format(channel))
+        logger.info('{} targets published to {}'.format(len(targets.index), channel))
         pStatus.proc_status = "processing"
         logger.info("Processing state set to 'processing\'")
 
