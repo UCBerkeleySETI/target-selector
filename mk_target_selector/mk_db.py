@@ -315,6 +315,7 @@ class Triage(DatabaseHandler):
 
         # initially, all sources assigned a priority of 2
         priority = np.full(tb.shape[0], 2, dtype=int)
+        # priority = np.random.randint(1, 7, size=tb.shape[0])
 
         query = """
                 SELECT source_id, antennas, n_antennas, bands, processed, max(duration) AS duration

@@ -175,16 +175,17 @@ class Listen(threading.Thread):
                 new_pool = self._get_sensor_value(product_id, "new_obs:pool_resources")
 
                 if mode == "current_obs":
+                    logger.info("Writing values of [{}:new_obs:*] to [{}:current_obs:*]".format(product_id, product_id))
                     write_pair_redis(self.redis_server, "{}:{}:coords".format(product_id, mode), new_coords)
-                    logger.info("Fetched {}:{}:coords: {}"
+                    logger.info("Fetched [{}:{}:coords]: [{}]"
                                 .format(product_id, mode, self._get_sensor_value(product_id, "{}:coords"
                                                                                  .format(mode))))
                     write_pair_redis(self.redis_server, "{}:{}:frequency".format(product_id, mode), new_freq)
-                    logger.info("Fetched {}:{}:frequency: {}"
+                    logger.info("Fetched [{}:{}:frequency]: [{}]"
                                 .format(product_id, mode, self._get_sensor_value(product_id, "{}:frequency"
                                                                                  .format(mode))))
                     write_pair_redis(self.redis_server, "{}:{}:pool_resources".format(product_id, mode), new_pool)
-                    logger.info("Fetched {}:{}:pool_resources: {}"
+                    logger.info("Fetched [{}:{}:pool_resources]: [{}]"
                                 .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources"
                                                                                  .format(mode))))
 
@@ -315,42 +316,46 @@ class Listen(threading.Thread):
                                                                               "new_obs:target_list")), sep=",",
                                               index_col=0)
                 appended_new = self.append_tbdfm(new_target_list)
+                # logger.info("appended_new:\n{}".format(appended_new))
 
                 # read in and format list of targets which remain to be processed from redis key to dataframe
                 remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                                    "current_obs:remaining_to_process")),
                                                    sep=",", index_col=0)
                 appended_remaining = self.append_tbdfm(remaining_to_process)
+                # logger.info("appended_remaining:\n{}".format(appended_remaining))
 
-                # minimum achievable TBDFM parameter for sources in the new target list
-                min_new_tbdfm = appended_new['tbdfm_param'].min()
+                # maximum achievable TBDFM parameter for sources in the new target list
+                max_new_tbdfm = appended_new['tbdfm_param'].max()
                 # number of sources in the new target list
                 n_new_obs = len(appended_new.index)
+                # the priority value for the maximum achievable TBDFM parameter for sources in the new target list
+                max_new_tbdfm_prio = appended_new.loc[appended_new['tbdfm_param']
+                                                      == max_new_tbdfm]['priority'].item()
+                # the N_sources value for the maximum achievable TBDFM parameter for sources in the new target list
+                max_new_tbdfm_num = appended_new.loc[appended_new['tbdfm_param']
+                                                     == max_new_tbdfm].index.values[0]+1
 
-                min_new_tbdfm_prio = appended_new.loc[appended_new['tbdfm_param']
-                                                      == min_new_tbdfm]['priority'].item()
-                min_new_tbdfm_num = appended_new.loc[appended_new['tbdfm_param']
-                                                     == min_new_tbdfm].index.values[0]+1
-
-                # minimum achievable TBDFM parameter for sources remaining to process
-                min_remaining_tbdfm = appended_remaining['tbdfm_param'].min()
+                # maximum achievable TBDFM parameter for sources remaining to process
+                max_remaining_tbdfm = appended_remaining['tbdfm_param'].max()
                 # number of sources remaining to process
                 n_remaining_obs = len(appended_remaining.index)
+                # the priority value for the maximum achievable TBDFM parameter for sources remaining to process
+                max_remaining_tbdfm_prio = appended_remaining.loc[appended_remaining['tbdfm_param']
+                                                                  == max_remaining_tbdfm]['priority'].item()
+                # the N_sources value for the maximum achievable TBDFM parameter for sources remaining to process
+                max_remaining_tbdfm_num = appended_remaining.loc[appended_remaining['tbdfm_param']
+                                                                 == max_remaining_tbdfm].index.values[0]+1
 
-                min_remaining_tbdfm_prio = appended_remaining.loc[appended_remaining['tbdfm_param']
-                                                                  == min_remaining_tbdfm]['priority'].item()
-                min_remaining_tbdfm_num = appended_remaining.loc[appended_remaining['tbdfm_param']
-                                                                 == min_remaining_tbdfm].index.values[0]+1
+                logger.info("Maximum TBDFM parameter (N_sources)^(1/priority) for {} targets in new pointing: "
+                            "{} ** 1/{} = {}"
+                            .format(n_new_obs, max_new_tbdfm_num, max_new_tbdfm_prio, max_new_tbdfm))
+                logger.info("Maximum TBDFM parameter (N_sources)^(1/priority) for {} targets remaining to process: "
+                            "{} ** 1/{} = {}"
+                            .format(n_remaining_obs, max_remaining_tbdfm_num, max_remaining_tbdfm_prio, max_remaining_tbdfm))
 
-                logger.info("Minimum TBDFM parameter (N_sources)^-(1/priority) for {} targets in new pointing: "
-                            "{} ** -1/{} = {}"
-                            .format(n_new_obs, min_new_tbdfm_num, min_new_tbdfm_prio, min_new_tbdfm))
-                logger.info("Minimum TBDFM parameter (N_sources)^-(1/priority) for {} targets remaining to process: "
-                            "{} ** -1/{} = {}"
-                            .format(n_remaining_obs, min_remaining_tbdfm_num, min_remaining_tbdfm_prio, min_remaining_tbdfm))
-
-                # if (min_new_tbdfm < min_remaining_tbdfm) and (mean_new_priority <= mean_remaining_priority):
-                if min_new_tbdfm < min_remaining_tbdfm:
+                # if (max_new_tbdfm < max_remaining_tbdfm) and (mean_new_priority <= mean_remaining_priority):
+                if max_new_tbdfm > max_remaining_tbdfm:
                     self.abort_criteria(product_id)
                     self.fetch_data(product_id, mode="current_obs")
                     if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
@@ -370,10 +375,10 @@ class Listen(threading.Thread):
 
                         self._publish_targets(targets_to_publish, product_id, sub_arr_id)
 
-                # elif (min_new_tbdfm >= min_remaining_tbdfm) \
+                # elif (max_new_tbdfm >= max_remaining_tbdfm) \
                 #         or (mean_new_priority > mean_remaining_priority):
-                elif min_new_tbdfm >= min_remaining_tbdfm:
-                    logger.info("New pointing does not contain sources with a lower minimum achievable TBDFM "
+                elif max_new_tbdfm <= max_remaining_tbdfm:
+                    logger.info("New pointing does not contain sources with a higher maximum achievable TBDFM "
                                 "parameter. Abort criteria not met. Continuing")
                     pass
 
@@ -619,25 +624,25 @@ class Listen(threading.Thread):
 
     def append_tbdfm(self, table):
         """Function to calculate and append TBDFM values to tables containing targets for both the new pointing and
-        those currently remaining process
+        those currently remaining to process
 
-        TBDFM = To Be Determined Figure of Merit; = (N_sources)^-(1/priority)
+        TBDFM = To Be Determined Figure of Merit; = (N_sources)^(1/priority)
 
         Parameters:
             table: (dataframe)
                 Table from which to calculate TBDFM and to which the values are appended
         Returns:
-            targets_dist: (dataframe)
+            table: (dataframe)
                 Dataframe with appended TBDFM values for each row
         """
         # create empty array for TBDFM parameter values in the target list
         tbdfm_param = np.full(table.shape[0], 0, dtype=float)
-        # fill this array with the (N_sources)^-(priority) value for each row
-        targets_dist = table.sort_values('dist_c', ignore_index=True)
-        tbdfm_param[targets_dist.index] = np.float_power((targets_dist.index + 1), -(1/targets_dist['priority']))
+        # fill this array with the (N_sources)^(1/priority) value for each row
+        # table = table.sort_values('dist_c', ignore_index=True)
+        tbdfm_param[table.index] = np.float_power((table.index + 1), (1/table['priority']))
         # append this array to the target list dataframe
-        targets_dist['tbdfm_param'] = tbdfm_param
-        return targets_dist
+        table['tbdfm_param'] = tbdfm_param
+        return table
 
     def abort_criteria(self, product_id, time_elapsed=None, observation_time=None, fraction_processed=None):
         """Function to abort processing if certain conditions are met
@@ -657,8 +662,8 @@ class Listen(threading.Thread):
         """
         if (not fraction_processed) and (not observation_time):
             # processing aborted based on priority of new sources & optimising TBDFM values
-            # (smaller TBDFM = better)
-            logger.info("New pointing contains sources with a lower minimum achievable TBDFM parameter. Aborting")
+            # (larger TBDFM = better)
+            logger.info("New pointing contains sources with a higher maximum achievable TBDFM parameter. Aborting")
             # self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info("Processing state set to \'ready\'")
