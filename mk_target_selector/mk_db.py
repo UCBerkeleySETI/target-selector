@@ -191,6 +191,11 @@ class Triage(DatabaseHandler):
             None
         """
 
+        if float(str(obs_start_time).split(":", 2)[2]) > 59.5:
+            round_m = float(str(obs_start_time).split(":", 2)[1]) + 1
+            round_s = "00"
+            obs_start_time = "{}:{}:{}".format(str(obs_start_time).split(":", 2)[0], round_m, round_s)
+
         update = """\
                     UPDATE {table}
                     SET processed = {processed}

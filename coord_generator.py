@@ -47,9 +47,11 @@ with open('random_seed.csv') as f:
 
         if choice([True, False]) is True:
             rand_dec_pos = '-'
+            rand_dec_d = format(randint(0, 89), '02d')
         else:
             rand_dec_pos = ''
-        rand_dec_d = format(randint(0, 89), '02d')
+            rand_dec_d = format(randint(0, 45), '02d')
+        # rand_dec_d = format(randint(0, 89), '02d')
         rand_dec_m = format(randint(0, 59), '02d')
         rand_dec_s = format(randint(0, 59), '02d')
         rand_dec_cs = format(randint(0, 9))
@@ -116,14 +118,20 @@ with open('random_seed.csv') as f:
                         # df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
                         # targetsFinal = df.transpose()
                         # print("\n",targetsFinal)
-                        for s in data['source_id']:
+                        for s in data.head(64)['source_id']:
                             publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
                             print('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
                             time.sleep(0.05)
+                        # time.sleep(2)
+                        print("Sleeping for {} seconds...".format(len(data.index)/20))
+                        time.sleep(len(data.index)/20)
                         for s in data.head(64)['source_id']:
                             publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
                             print('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
                             time.sleep(0.05)
+                        # time.sleep(2)
+                        print("Sleeping for {} seconds...".format(len(data.index)/20))
+                        time.sleep(len(data.index)/20)
                 except TypeError:  # array_1:pointing_0:targets empty (NoneType)
                     pass
                 except Exception as k:

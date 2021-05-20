@@ -137,21 +137,20 @@ class Listen(threading.Thread):
         for item in self.p.listen():
             self._message_to_func(item['channel'], self.channel_actions)(item['data'])
 
-            product_id = self._parse_sensor_name(item['data'])[0]
-            if "None" not in str(self._get_sensor_value(product_id, "current_obs:proc_start_time")):
-                proc_start_time = self._get_sensor_value(product_id, "current_obs:proc_start_time")
-                time_elapsed = (datetime.now()
-                                - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
-                obs_start_time = self._get_sensor_value(product_id, "current_obs:obs_start_time")
-                obs_end_time = self._get_sensor_value(product_id, "current_obs:obs_end_time")
-                observation_time = (datetime.strptime(obs_end_time, "%Y-%m-%d %H:%M:%S.%f")
-                                    - datetime.strptime(obs_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
+            # product_id = self._parse_sensor_name(item['data'])[0]
+            # obs_start_time = self._get_sensor_value(product_id, "current_obs:obs_start_time")
+            # obs_end_time = self._get_sensor_value(product_id, "current_obs:obs_end_time")
+            # if "None" not in str(self._get_sensor_value(product_id, "current_obs:proc_start_time")):
+            # proc_start_time = self._get_sensor_value(product_id, "current_obs:proc_start_time")
+            # time_elapsed = (datetime.now()
+            #                 - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
+            # observation_time = (datetime.strptime(obs_end_time, "%Y-%m-%d %H:%M:%S.%f")
+            #                     - datetime.strptime(obs_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
 
-                # self.abort_criteria(product_id, time_elapsed, observation_time)
+            # self.abort_criteria(product_id, time_elapsed, observation_time)
 
     def fetch_data(self, product_id, mode):
-        """Fetches telescope status data and select targets if and when
-           the status of the targets selector is ready & telescope status data is stored
+        """Fetches telescope status data and selects targets when telescope status data is stored
 
         Parameters:
             product_id: (str)
@@ -316,7 +315,7 @@ class Listen(threading.Thread):
                 # read in and format new target list from redis key to dataframe
                 new_target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                               "new_obs:target_list")), sep=",",
-                                              index_col=0)
+                                              index_col=0, dtype={'source_id': str})
                 appended_new = self.append_tbdfm(new_target_list)
                 # with pd.option_context('display.max_rows', None):
                 #     logger.info("appended_new:\n\n{}\n"
@@ -325,7 +324,7 @@ class Listen(threading.Thread):
                 # read in and format list of targets which remain to be processed from redis key to dataframe
                 remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                                    "current_obs:remaining_to_process")),
-                                                   sep=",", index_col=0)
+                                                   sep=",", index_col=0, dtype={'source_id': str})
                 # logger.info("remaining_to_process:\n\n{}\n".format(remaining_to_process))
                 appended_remaining = self.append_tbdfm(remaining_to_process)
                 # with pd.option_context('display.max_rows', None):
@@ -576,17 +575,21 @@ class Listen(threading.Thread):
 
         target_list = pd.read_csv(
             StringIO(
-                self._get_sensor_value(product_id, "current_obs:target_list")), sep=",", index_col=0)
+                self._get_sensor_value(
+                    product_id, "current_obs:target_list")),
+            sep=",", index_col=0, dtype={'source_id': str})
 
         number_to_process = len(target_list.index)
-        number_processed = target_list[target_list['source_id'] == float(source_id)].index.values[0]+1
+        number_processed = target_list[target_list['source_id'] == str(source_id)].index.values[0]+1
         fraction_processed = number_processed / number_to_process
 
         remaining_list = pd.read_csv(
             StringIO(
-                self._get_sensor_value(product_id, "current_obs:remaining_to_process")), sep=",", index_col=0)
+                self._get_sensor_value(
+                    product_id, "current_obs:remaining_to_process")),
+            sep=",", index_col=0, dtype={'source_id': str})
 
-        remaining_to_process = pd.DataFrame.to_csv(remaining_list[remaining_list.source_id != float(source_id)]
+        remaining_to_process = pd.DataFrame.to_csv(remaining_list[remaining_list.source_id != str(source_id)]
                                                    .reset_index(drop=True))
 
         write_pair_redis(self.redis_server,
@@ -599,6 +602,8 @@ class Listen(threading.Thread):
             logger.info("Confirmation of successful processing of all sources received from processing nodes")
             self._deconfigure(product_id)
             pStatus.proc_status = "ready"
+            logger.info(
+                "-------------------------------------------------------------------------------------------------")
             logger.info("Processing state set to \'ready\'")
 
         # self.abort_criteria(product_id, time_elapsed, fraction_processed)
@@ -625,9 +630,9 @@ class Listen(threading.Thread):
                 # all sources have been received by the processing nodes
                 # begin processing time
                 logger.info("Receipt of all targets confirmed by processing nodes")
-                write_pair_redis(self.redis_server,
-                                 "{}:current_obs:proc_start_time".format(product_id),
-                                 str(datetime.now()))
+                # write_pair_redis(self.redis_server,
+                #                  "{}:current_obs:proc_start_time".format(product_id),
+                #                  str(datetime.now()))
 
     """
 
@@ -679,6 +684,8 @@ class Listen(threading.Thread):
             logger.info("New pointing contains sources with a higher maximum achievable TBDFM parameter. Aborting")
             # self._deconfigure(product_id)
             pStatus.proc_status = "ready"
+            logger.info(
+                "-------------------------------------------------------------------------------------------------")
             logger.info("Processing state set to \'ready\'")
 
         elif not fraction_processed:  # processing aborted based on observation time (t_obs)
@@ -687,6 +694,8 @@ class Listen(threading.Thread):
                             " Aborting")
                 self._deconfigure(product_id)
                 pStatus.proc_status = "ready"
+                logger.info(
+                    "-------------------------------------------------------------------------------------------------")
                 logger.info("Processing state set to \'ready\'")
 
         elif not observation_time:  # processing aborted based on absolute processing time
@@ -695,6 +704,8 @@ class Listen(threading.Thread):
                             " Aborting")
                 self._deconfigure(product_id)
                 pStatus.proc_status = "ready"
+                logger.info(
+                    "-------------------------------------------------------------------------------------------------")
                 logger.info("Processing state set to \'ready\'")
 
     def reformat_table(self, table):
