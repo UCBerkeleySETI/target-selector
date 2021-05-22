@@ -103,13 +103,13 @@ with open('random_seed.csv') as f:
                 if final_messages[i+4].endswith('True'):
                     print(chnls[i], final_messages[i])
                     r.publish(chnls[i], final_messages[i])
-                    print("Observing for 5 seconds...")
-                    time.sleep(5)
+                    print("Observing for 10 seconds...")
+                    time.sleep(10)
             elif final_messages[i+1].startswith('deconfigure'):
                 try:
-                    key_glob = '*:*:remaining_to_process'
+                    key_glob = '*:*:processing_64'
                     for k in r.scan_iter(key_glob):
-                        time.sleep(5)
+                        time.sleep(0.05)
                         product_id = (str(k)[1:].replace("\'", "")).split(':')[0]
                         targets = str(r.get(k), 'utf-8')
                         data = pd.read_csv(
@@ -118,20 +118,16 @@ with open('random_seed.csv') as f:
                         # df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
                         # targetsFinal = df.transpose()
                         # print("\n",targetsFinal)
-                        for s in data.head(64)['source_id']:
+                        for s in data['source_id']:
                             publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
                             print('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
                             time.sleep(0.05)
-                        # time.sleep(2)
-                        print("Sleeping for {} seconds...".format(len(data.index)/20))
-                        time.sleep(len(data.index)/20)
-                        for s in data.head(64)['source_id']:
+                        time.sleep(0.05)
+                        for s in data['source_id']:
                             publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
                             print('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
                             time.sleep(0.05)
-                        # time.sleep(2)
-                        print("Sleeping for {} seconds...".format(len(data.index)/20))
-                        time.sleep(len(data.index)/20)
+                        time.sleep(0.05)
                 except TypeError:  # array_1:pointing_0:targets empty (NoneType)
                     pass
                 except Exception as k:
@@ -141,10 +137,10 @@ with open('random_seed.csv') as f:
                 r.publish(chnls[i], final_messages[i])
                 time.sleep(0.05)
             elif final_messages[i].startswith('deconfigure'):
-                time.sleep(1)
+                time.sleep(0.05)
                 print(chnls[i], final_messages[i])
                 r.publish(chnls[i], final_messages[i])
-                time.sleep(1)
+                time.sleep(0.05)
             else:
                 print(chnls[i], final_messages[i])
                 r.publish(chnls[i], final_messages[i])

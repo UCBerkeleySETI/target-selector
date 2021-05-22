@@ -317,19 +317,12 @@ class Listen(threading.Thread):
                                                                               "new_obs:target_list")), sep=",",
                                               index_col=0, dtype={'source_id': str})
                 appended_new = self.append_tbdfm(new_target_list)
-                # with pd.option_context('display.max_rows', None):
-                #     logger.info("appended_new:\n\n{}\n"
-                #                 .format(appended_new.drop(labels=['project', 'table_name'], axis=1)))
 
                 # read in and format list of targets which remain to be processed from redis key to dataframe
                 remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
                                                                                    "current_obs:remaining_to_process")),
                                                    sep=",", index_col=0, dtype={'source_id': str})
-                # logger.info("remaining_to_process:\n\n{}\n".format(remaining_to_process))
                 appended_remaining = self.append_tbdfm(remaining_to_process)
-                # with pd.option_context('display.max_rows', None):
-                #     logger.info("appended_remaining:\n\n{}\n"
-                #                 .format(appended_remaining.drop(labels=['project', 'table_name'], axis=1)))
 
                 # maximum achievable TBDFM parameter for sources in the new target list
                 max_new_tbdfm = appended_new['tbdfm_param'].max()
@@ -399,16 +392,7 @@ class Listen(threading.Thread):
         """
         logger.info("Capture stop message received: {}".format(message))
         product_id = message.split(":")[-1]
-
-        # LATEST CHANGES BELOW: won't need after we have tracking messages
-        if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")) \
-                and "None" in str(self._get_sensor_value(product_id, "current_obs:obs_end_time")):  # HERE
-            try:
-                obs_end_time = datetime.now()
-                write_pair_redis(self.redis_server, "{}:current_obs:obs_end_time".format(product_id), str(obs_end_time))
-                self.store_metadata(product_id)
-            except Exception as e:
-                logger.info(e)
+        self.store_metadata(product_id, mode="new_sample")
 
     """
 
@@ -588,23 +572,36 @@ class Listen(threading.Thread):
                 self._get_sensor_value(
                     product_id, "current_obs:remaining_to_process")),
             sep=",", index_col=0, dtype={'source_id': str})
-
-        remaining_to_process = pd.DataFrame.to_csv(remaining_list[remaining_list.source_id != str(source_id)]
-                                                   .reset_index(drop=True))
-
+        remaining = remaining_list[remaining_list.source_id != str(source_id)].reset_index(drop=True)
+        remaining_to_process = pd.DataFrame.to_csv(remaining)
         write_pair_redis(self.redis_server,
                          "{}:current_obs:remaining_to_process".format(product_id), remaining_to_process)
+
+        processing_64 = pd.read_csv(
+            StringIO(
+                self._get_sensor_value(
+                    product_id, "current_obs:processing_64")),
+            sep=",", index_col=0, dtype={'source_id': str})
 
         # proc_start_time = self._get_sensor_value(product_id, "current_obs:proc_start_time")
         # time_elapsed = (datetime.now() - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
 
         if number_processed == number_to_process:
-            logger.info("Confirmation of successful processing of all sources received from processing nodes")
+            logger.info("Confirmation of successful processing of all remaining targets received from processing nodes")
             self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info(
                 "-------------------------------------------------------------------------------------------------")
             logger.info("Processing state set to \'ready\'")
+
+        elif processing_64['source_id'].iloc[-1].lstrip() in message:
+            logger.info("Confirmation of successful processing of 64 targets received from processing nodes. "
+                        "Writing next {} to {}:current_obs:processing_64"
+                        .format(len(remaining.head(64).index), product_id))
+            next_64 = pd.DataFrame.to_csv(remaining.head(64))
+            self._publish_targets(remaining, product_id)
+            write_pair_redis(self.redis_server, "{}:current_obs:processing_64".format(product_id), next_64)
+            self.store_metadata(product_id, mode="next_64")
 
         # self.abort_criteria(product_id, time_elapsed, fraction_processed)
 
@@ -629,7 +626,7 @@ class Listen(threading.Thread):
             if self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
                 # all sources have been received by the processing nodes
                 # begin processing time
-                logger.info("Receipt of all targets confirmed by processing nodes")
+                logger.info("Receipt of all remaining targets confirmed by processing nodes")
                 # write_pair_redis(self.redis_server,
                 #                  "{}:current_obs:proc_start_time".format(product_id),
                 #                  str(datetime.now()))
@@ -871,39 +868,52 @@ class Listen(threading.Thread):
 
         logger.info('Unsubscribed from channel(s)')
 
-    def store_metadata(self, product_id):
+    def store_metadata(self, product_id, mode):
         """Stores observation metadata in database.
 
         Parameters:
             product_id: (str)
                 Product ID of the subarray from which status metadata is pulled to add to the table of previously
                  completed observations
-
+            mode: (str)
+                Either new_sample or next_64; if mode=new_sample, the observation end time is set, else the previously
+                stored value is used
         Returns:
             None
         """
 
-        pool_resources = self._get_sensor_value(product_id, "current_obs:pool_resources")
+        if (pStatus.proc_status == "ready") or (mode == "next_64"):
+            if mode == "new_sample":
+                try:
+                    obs_end_time = datetime.now()
+                    write_pair_redis(self.redis_server,
+                                     "{}:current_obs:obs_end_time".format(product_id), str(obs_end_time))
+                    pStatus.proc_status = "processing"
+                    logger.info("Processing state set to 'processing\'")
+                except Exception as e:
+                    logger.info(e)
 
-        antennas = ','.join(re.findall(r'm\d{3}', pool_resources))
-        proxies = ','.join(re.findall(r'[a-z A-Z]+_\d', pool_resources))
-        start = self._get_sensor_value(product_id, "current_obs:obs_start_time")
-        end = self._get_sensor_value(product_id, "current_obs:obs_end_time")
+            pool_resources = self._get_sensor_value(product_id, "current_obs:pool_resources")
 
-        # TODO: Change this to handle specific pointing in subarray
-        targets = pd.read_csv(StringIO(self._get_sensor_value(product_id, "current_obs:target_list")),
-                              sep=",", index_col=0)
+            antennas = ','.join(re.findall(r'm\d{3}', pool_resources))
+            proxies = ','.join(re.findall(r'[a-z A-Z]+_\d', pool_resources))
+            start = self._get_sensor_value(product_id, "current_obs:obs_start_time")
+            end = self._get_sensor_value(product_id, "current_obs:obs_end_time")
 
-        # TODO: query frequency band sensor
-        current_freq = self._get_sensor_value(product_id, "current_obs:frequency")
-        bands = self.engine._freqBand(current_freq)
+            # TODO: Change this to handle specific pointing in subarray
+            targets = pd.read_csv(StringIO(self._get_sensor_value(product_id, "current_obs:processing_64")),
+                                  sep=",", index_col=0)
 
-        # antenna count
-        n_antennas = antennas.count(',') + 1
+            # TODO: query frequency band sensor
+            current_freq = self._get_sensor_value(product_id, "current_obs:frequency")
+            bands = self.engine._freqBand(current_freq)
 
-        # TODO: ask Daniel/Dave about unique file-id
-        file_id = 'filler_file_id'
-        self.engine.add_sources_to_db(targets, start, end, proxies, antennas, n_antennas, file_id, bands)
+            # antenna count
+            n_antennas = antennas.count(',') + 1
+
+            # TODO: ask Daniel/Dave about unique file-id
+            file_id = 'filler_file_id'
+            self.engine.add_sources_to_db(targets, start, end, proxies, antennas, n_antennas, file_id, bands)
 
     def _beam_radius(self, current_freq, dish_size=13.5):
         """Returns the beam radius based on the frequency band used in the
@@ -921,7 +931,7 @@ class Listen(threading.Thread):
         beam_rad = (2.998e8 / float(current_freq)) / dish_size
         return beam_rad
 
-    def _publish_targets(self, targets, product_id, channel, columns=None,
+    def _publish_targets(self, targets, product_id, columns=None,
                          sub_arr_id=0, sensor_name='targets'):
         """Reformat the table returned from target searching
 
@@ -943,21 +953,22 @@ class Listen(threading.Thread):
             None
         """
 
-        if not columns:
-            columns = ['source_id', 'ra', 'decl', 'priority']
+        columns = ['source_id', 'ra', 'decl', 'priority']
 
-        channel = "bluse:///set"
         targ_dict = targets.loc[:, columns].to_dict('list')
         key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
         key_current_obs = '{}:current_obs:remaining_to_process'.format(product_id)
+        key_64 = '{}:current_obs:processing_64'.format(product_id)
         write_pair_redis(self.redis_server, key, json.dumps(targ_dict))
-        to_process = pd.DataFrame.to_csv(targets)
-        write_pair_redis(self.redis_server, key_current_obs, to_process)
+        remaining_to_process = pd.DataFrame.to_csv(targets)
+        write_pair_redis(self.redis_server, key_current_obs, remaining_to_process)
+        processing_64 = pd.DataFrame.to_csv(targets.head(64))
+        write_pair_redis(self.redis_server, key_64, processing_64)
+
+        channel = "bluse:///set"
         publish(self.redis_server, channel, key)
 
-        logger.info('{} targets published to {}'.format(len(targets.index), channel))
-        pStatus.proc_status = "processing"
-        logger.info("Processing state set to 'processing\'")
+        logger.info('{} of {} targets published to {}'.format(len(targets.head(64).index), len(targets.index), channel))
 
     def pointing_coords(self, t_str):
         """Function used to clean up run loop and parse pointing information
