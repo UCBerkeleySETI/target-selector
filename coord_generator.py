@@ -105,6 +105,17 @@ with open('random_seed.csv') as f:
                     r.publish(chnls[i], final_messages[i])
                     print("Observing for 10 seconds...")
                     time.sleep(10)
+                # try:
+                #     key_glob_remaining = '*:*:remaining_to_process'
+                #     for j in r.scan_iter(key_glob_remaining):
+                #         targets = str(r.get(j), 'utf-8')
+                #         data = pd.read_csv(
+                #             StringIO(targets), sep=",", index_col=0)
+                #         print("Waiting for {} seconds...".format(np.sqrt(len(data.index))))
+                #         time.sleep(np.sqrt(len(data.index)))
+                # except Exception as k:
+                #     print(k)
+                #     pass
             elif final_messages[i+1].startswith('deconfigure'):
                 try:
                     key_glob = '*:*:processing_64'

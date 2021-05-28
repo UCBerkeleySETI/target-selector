@@ -567,15 +567,29 @@ class Listen(threading.Thread):
         number_processed = target_list[target_list['source_id'] == str(source_id)].index.values[0]+1
         fraction_processed = number_processed / number_to_process
 
-        remaining_list = pd.read_csv(
+        # remaining_list = pd.read_csv(
+        #     StringIO(
+        #         self._get_sensor_value(
+        #             product_id, "current_obs:remaining_to_process")),
+        #     sep=",", index_col=0, dtype={'source_id': str})
+        # remaining = remaining_list[remaining_list.source_id != str(source_id)].reset_index(drop=True)
+        # remaining_to_process = pd.DataFrame.to_csv(remaining)
+        # write_pair_redis(self.redis_server,
+        #                  "{}:current_obs:remaining_to_process".format(product_id), remaining_to_process)
+
+        # TODO: CHECK REDIS HASHES AND REDIS LISTS, check regex first
+
+        write_pair_redis(
+            self.redis_server,
+            "{}:current_obs:remaining_to_process".format(product_id),
+            re.sub(r".*{}.*\n".format(source_id), "\n", self._get_sensor_value(
+                product_id, "current_obs:remaining_to_process"), count=1))
+
+        remaining = pd.read_csv(
             StringIO(
                 self._get_sensor_value(
                     product_id, "current_obs:remaining_to_process")),
-            sep=",", index_col=0, dtype={'source_id': str})
-        remaining = remaining_list[remaining_list.source_id != str(source_id)].reset_index(drop=True)
-        remaining_to_process = pd.DataFrame.to_csv(remaining)
-        write_pair_redis(self.redis_server,
-                         "{}:current_obs:remaining_to_process".format(product_id), remaining_to_process)
+            sep=",", index_col=0, dtype={'source_id': str}).reset_index(drop=True)
 
         processing_64 = pd.read_csv(
             StringIO(
@@ -587,7 +601,8 @@ class Listen(threading.Thread):
         # time_elapsed = (datetime.now() - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
 
         if number_processed == number_to_process:
-            logger.info("Confirmation of successful processing of all remaining targets received from processing nodes")
+            logger.info("Successful processing of all {} remaining targets confirmed by processing nodes"
+                        .format(len(processing_64.index)))
             self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info(
@@ -595,7 +610,7 @@ class Listen(threading.Thread):
             logger.info("Processing state set to \'ready\'")
 
         elif processing_64['source_id'].iloc[-1].lstrip() in message:
-            logger.info("Confirmation of successful processing of 64 targets received from processing nodes. "
+            logger.info("Successful processing of 64 targets confirmed by processing nodes. "
                         "Writing next {} to {}:current_obs:processing_64"
                         .format(len(remaining.head(64).index), product_id))
             next_64 = pd.DataFrame.to_csv(remaining.head(64))
@@ -619,17 +634,25 @@ class Listen(threading.Thread):
         product_id = message.split(':')[0]
 
         # if message contains final target source_id,
-        key_glob = ('{}:*:{}'.format(product_id, 'targets'))
+        remaining_all = pd.read_csv(StringIO(self._get_sensor_value(product_id, "current_obs:remaining_to_process")),
+                                    sep=",", index_col=0, dtype={'source_id': str})
 
-        for k in self.redis_server.scan_iter(key_glob):
-            q = get_redis_key(self.redis_server, k)
-            if self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
-                # all sources have been received by the processing nodes
-                # begin processing time
-                logger.info("Receipt of all remaining targets confirmed by processing nodes")
-                # write_pair_redis(self.redis_server,
-                #                  "{}:current_obs:proc_start_time".format(product_id),
-                #                  str(datetime.now()))
+        if remaining_all['source_id'].iloc[-1].lstrip() in message:
+            # all sources have been received by the processing nodes
+            # begin processing time
+            logger.info("Receipt of all {} remaining targets confirmed by processing nodes"
+                        .format(len(remaining_all.index)))
+            # write_pair_redis(self.redis_server,
+            #                  "{}:current_obs:proc_start_time".format(product_id),
+            #                  str(datetime.now()))
+
+        elif remaining_all['source_id'].head(64).iloc[-1].lstrip() in message:
+            # 64 sources have been received by the processing nodes
+            # begin processing time
+            logger.info("Receipt of next 64 targets confirmed by processing nodes")
+            # write_pair_redis(self.redis_server,
+            #                  "{}:current_obs:proc_start_time".format(product_id),
+            #                  str(datetime.now()))
 
     """
 
@@ -882,38 +905,36 @@ class Listen(threading.Thread):
             None
         """
 
-        if (pStatus.proc_status == "ready") or (mode == "next_64"):
-            if mode == "new_sample":
-                try:
-                    obs_end_time = datetime.now()
-                    write_pair_redis(self.redis_server,
-                                     "{}:current_obs:obs_end_time".format(product_id), str(obs_end_time))
-                    pStatus.proc_status = "processing"
-                    logger.info("Processing state set to 'processing\'")
-                except Exception as e:
-                    logger.info(e)
+        if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
+            if (pStatus.proc_status == "ready") or (mode == "next_64"):
+                if mode == "new_sample":
+                    try:
+                        obs_end_time = datetime.now()
+                        write_pair_redis(self.redis_server,
+                                         "{}:current_obs:obs_end_time".format(product_id), str(obs_end_time))
+                        pStatus.proc_status = "processing"
+                        logger.info("Processing state set to 'processing\'")
+                    except Exception as e:
+                        logger.info(e)
 
-            pool_resources = self._get_sensor_value(product_id, "current_obs:pool_resources")
+                pool_resources = self._get_sensor_value(product_id, "current_obs:pool_resources")
 
-            antennas = ','.join(re.findall(r'm\d{3}', pool_resources))
-            proxies = ','.join(re.findall(r'[a-z A-Z]+_\d', pool_resources))
-            start = self._get_sensor_value(product_id, "current_obs:obs_start_time")
-            end = self._get_sensor_value(product_id, "current_obs:obs_end_time")
+                antennas = ','.join(re.findall(r'm\d{3}', pool_resources))
+                proxies = ','.join(re.findall(r'[a-z A-Z]+_\d', pool_resources))
+                start = self._get_sensor_value(product_id, "current_obs:obs_start_time")
+                end = self._get_sensor_value(product_id, "current_obs:obs_end_time")
+                # TODO: query frequency band sensor
+                current_freq = self._get_sensor_value(product_id, "current_obs:frequency")
+                bands = self.engine._freqBand(current_freq)
+                # antenna count
+                n_antennas = antennas.count(',') + 1
+                # TODO: ask Daniel/Dave about unique file-id
+                file_id = 'filler_file_id'
 
-            # TODO: Change this to handle specific pointing in subarray
-            targets = pd.read_csv(StringIO(self._get_sensor_value(product_id, "current_obs:processing_64")),
-                                  sep=",", index_col=0)
-
-            # TODO: query frequency band sensor
-            current_freq = self._get_sensor_value(product_id, "current_obs:frequency")
-            bands = self.engine._freqBand(current_freq)
-
-            # antenna count
-            n_antennas = antennas.count(',') + 1
-
-            # TODO: ask Daniel/Dave about unique file-id
-            file_id = 'filler_file_id'
-            self.engine.add_sources_to_db(targets, start, end, proxies, antennas, n_antennas, file_id, bands)
+                # TODO: Change this to handle specific pointing in subarray
+                targets = pd.read_csv(StringIO(self._get_sensor_value(product_id, "current_obs:processing_64")),
+                                      sep=",", index_col=0)
+                self.engine.add_sources_to_db(targets, start, end, proxies, antennas, n_antennas, file_id, bands)
 
     def _beam_radius(self, current_freq, dish_size=13.5):
         """Returns the beam radius based on the frequency band used in the

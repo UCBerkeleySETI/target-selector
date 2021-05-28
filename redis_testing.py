@@ -47,34 +47,31 @@ for i in range(len(msgs)-1):
             time.sleep(20)
     elif msgs[i+1].startswith('deconfigure'):
         try:
-            key_glob = '*:*:targets'
+            key_glob = '*:*:processing_64'
             for k in r.scan_iter(key_glob):
+                time.sleep(0.05)
                 product_id = (str(k)[1:].replace("\'", "")).split(':')[0]
                 targets = str(r.get(k), 'utf-8')
-                w = targets.replace("\"", "")
-                e = w.replace(":", ",")
-                t = e.replace("[", "")
-                y = t.replace("], ", "\n")
-                u = y.replace("]", "")
-                o = u.replace("{", "")
-                p = o.replace("}", "")
-                data = StringIO(p)
-                df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
-                targetsFinal = df.transpose()
-                print("\n",targetsFinal)
-                time.sleep(10)
-                for s in targetsFinal['source_id']:
-                    publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
-                    print('sensor alerts', '{}:acknowledge_source_id_{}'.format(product_id, s.lstrip()), "True")
-                time.sleep(10)
-                for s in targetsFinal['source_id']:
-                    publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
-                    print('sensor alerts', '{}:success_source_id_{}'.format(product_id, s.lstrip()), "True")
+                data = pd.read_csv(
+                    StringIO(targets), sep=",", index_col=0)
+                print("\n{}\n".format(data))
+                # df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
+                # targetsFinal = df.transpose()
+                # print("\n",targetsFinal)
+                for s in data['source_id']:
+                    publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
+                    print('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
+                    time.sleep(0.05)
+                time.sleep(0.05)
+                for s in data['source_id']:
+                    publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
+                    print('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
+                    time.sleep(0.05)
+                time.sleep(0.05)
         except TypeError:  # array_1:pointing_0:targets empty (NoneType)
-            print(Exception)
             pass
         except Exception as k:
-            print(type(k), k)
+            print(k)
             pass
         r.publish(chnls[i], msgs[i])
         time.sleep(0.5)
