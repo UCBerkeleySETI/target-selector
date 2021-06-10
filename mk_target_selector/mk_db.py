@@ -404,7 +404,7 @@ class Triage(DatabaseHandler):
         """
 
         if not cols:
-            cols = ['ra', 'decl', 'source_id', 'project', 'dist_c', 'table_name']
+            cols = ['ra', 'decl', 'source_id', 'dist_c', 'table_name']
 
         mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols, current_freq, check_flag)
 

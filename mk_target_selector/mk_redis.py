@@ -203,7 +203,9 @@ class Listen(threading.Thread):
                                                                                              "{}:frequency"
                                                                                              .format(mode))),
                                            check_flag=check_flag)
-                targets_table = pd.DataFrame.to_csv(targets)
+
+                columns = ['index', 'ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
+                targ_dict = targets.loc[:, columns].to_dict('list')
 
                 if len(targets.index) == 0:
                     self.coord_error(coords=self._get_sensor_value(product_id, "{}:coords".format(mode)),
@@ -211,7 +213,8 @@ class Listen(threading.Thread):
                                      mode=mode,
                                      product_id=product_id)
                 else:
-                    write_pair_redis(self.redis_server, "{}:{}:target_list".format(product_id, mode), targets_table)
+                    write_pair_redis(self.redis_server, "{}:{}:target_list"
+                                     .format(product_id, mode), json.dumps(targ_dict))
 
             except KeyError:
                 pass
@@ -293,19 +296,15 @@ class Listen(threading.Thread):
             self.fetch_data(product_id, mode="current_obs")
             if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
                 sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
-                pulled_targets = StringIO(self._get_sensor_value(product_id, "current_obs:target_list"))
+                pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
                 pulled_coords = self._get_sensor_value(product_id, "current_obs:coords")
                 pulled_freq = self.engine.freq_format(self._get_sensor_value(product_id, "current_obs:frequency"))
-
-                targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
-                # logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
-                #                                                               pulled_freq, targets_to_publish))
 
                 obs_start_time = datetime.now()
                 write_pair_redis(self.redis_server,
                                  "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
-                self._publish_targets(targets_to_publish, product_id, sub_arr_id)
+                self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
         elif pStatus.proc_status == "processing":
             logger.info("Still processing previous pointing. Checking abort criteria")
@@ -313,15 +312,13 @@ class Listen(threading.Thread):
             if "None" not in str(self._get_sensor_value(product_id, "new_obs:target_list")):
 
                 # read in and format new target list from redis key to dataframe
-                new_target_list = pd.read_csv(StringIO(self._get_sensor_value(product_id,
-                                                                              "new_obs:target_list")), sep=",",
-                                              index_col=0, dtype={'source_id': str})
+                new_target_list = pd.DataFrame.from_dict(json.loads(
+                    self._get_sensor_value(product_id, "new_obs:target_list")))
                 appended_new = self.append_tbdfm(new_target_list)
 
                 # read in and format list of targets which remain to be processed from redis key to dataframe
-                remaining_to_process = pd.read_csv(StringIO(self._get_sensor_value(product_id,
-                                                                                   "current_obs:remaining_to_process")),
-                                                   sep=",", index_col=0, dtype={'source_id': str})
+                remaining_to_process = pd.DataFrame.from_dict(json.loads(
+                    self._get_sensor_value(product_id, "current_obs:remaining_to_process")))
                 appended_remaining = self.append_tbdfm(remaining_to_process)
 
                 # maximum achievable TBDFM parameter for sources in the new target list
@@ -359,12 +356,10 @@ class Listen(threading.Thread):
                     self.fetch_data(product_id, mode="current_obs")
                     if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
                         sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
-                        pulled_targets = StringIO(self._get_sensor_value(product_id, "current_obs:target_list"))
+                        pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
                         pulled_coords = self._get_sensor_value(product_id, "current_obs:coords")
                         pulled_freq = self.engine.freq_format(
                             self._get_sensor_value(product_id, "current_obs:frequency"))
-
-                        targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
                         # logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
                         #                                                               pulled_freq, targets_to_publish))
 
@@ -372,7 +367,7 @@ class Listen(threading.Thread):
                         write_pair_redis(self.redis_server,
                                          "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
-                        self._publish_targets(targets_to_publish, product_id, sub_arr_id)
+                        self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
                 # elif (max_new_tbdfm >= max_remaining_tbdfm) \
                 #         or (mean_new_priority > mean_remaining_priority):
@@ -557,14 +552,11 @@ class Listen(threading.Thread):
                                                           (product_id, "current_obs:obs_start_time"))),
                                       processed='TRUE')
 
-        target_list = pd.read_csv(
-            StringIO(
-                self._get_sensor_value(
-                    product_id, "current_obs:target_list")),
-            sep=",", index_col=0, dtype={'source_id': str})
-
-        number_to_process = len(target_list.index)
-        number_processed = target_list[target_list['source_id'] == str(source_id)].index.values[0]+1
+        target_list = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
+        remaining_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
+        number_to_process = len(target_list.get('source_id'))
+        number_processed = target_list.get('source_id').index(source_id) + 1
+        number_remaining = len(remaining_64.get('source_id'))
         fraction_processed = number_processed / number_to_process
 
         # remaining_list = pd.read_csv(
@@ -579,43 +571,41 @@ class Listen(threading.Thread):
 
         # TODO: CHECK REDIS HASHES AND REDIS LISTS, check regex first
 
+        # FIND INDEX WHERE SOURCE_ID == SOURCE_ID
+        target_list = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
+        index_to_rm = target_list.get('source_id').index(source_id)
+
+        # REMOVE INDEX FROM LISTS UNDER ALL KEYS
+        keys = ['index', 'ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
+        for i in keys:
+            to_rm = target_list.get(i)
+            del to_rm[index_to_rm]
+
         write_pair_redis(
             self.redis_server,
-            "{}:current_obs:remaining_to_process".format(product_id),
-            re.sub(r".*{}.*\n".format(source_id), "\n", self._get_sensor_value(
-                product_id, "current_obs:remaining_to_process"), count=1))
-
-        remaining = pd.read_csv(
-            StringIO(
-                self._get_sensor_value(
-                    product_id, "current_obs:remaining_to_process")),
-            sep=",", index_col=0, dtype={'source_id': str}).reset_index(drop=True)
-
-        processing_64 = pd.read_csv(
-            StringIO(
-                self._get_sensor_value(
-                    product_id, "current_obs:processing_64")),
-            sep=",", index_col=0, dtype={'source_id': str})
+            "{}:current_obs:remaining_to_process".format(product_id), json.dumps(target_list))
+        remaining = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
+        processing_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
 
         # proc_start_time = self._get_sensor_value(product_id, "current_obs:proc_start_time")
         # time_elapsed = (datetime.now() - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
 
         if number_processed == number_to_process:
             logger.info("Successful processing of all {} remaining targets confirmed by processing nodes"
-                        .format(len(processing_64.index)))
+                        .format(number_remaining))
             self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info(
                 "-------------------------------------------------------------------------------------------------")
             logger.info("Processing state set to \'ready\'")
 
-        elif processing_64['source_id'].iloc[-1].lstrip() in message:
+        elif processing_64['source_id'][-1] in message:
             logger.info("Successful processing of 64 targets confirmed by processing nodes. "
                         "Writing next {} to {}:current_obs:processing_64"
-                        .format(len(remaining.head(64).index), product_id))
-            next_64 = pd.DataFrame.to_csv(remaining.head(64))
+                        .format(len(processing_64.get('source_id')), product_id))
+            next_64 = {k: v[:64] for k, v in remaining.items()}
             self._publish_targets(remaining, product_id)
-            write_pair_redis(self.redis_server, "{}:current_obs:processing_64".format(product_id), next_64)
+            write_pair_redis(self.redis_server, "{}:current_obs:processing_64".format(product_id), json.dumps(next_64))
             self.store_metadata(product_id, mode="next_64")
 
         # self.abort_criteria(product_id, time_elapsed, fraction_processed)
@@ -634,19 +624,19 @@ class Listen(threading.Thread):
         product_id = message.split(':')[0]
 
         # if message contains final target source_id,
-        remaining_all = pd.read_csv(StringIO(self._get_sensor_value(product_id, "current_obs:remaining_to_process")),
-                                    sep=",", index_col=0, dtype={'source_id': str})
+        remaining_all = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
+        remaining_64 = {k: v[:64] for k, v in remaining_all.items()}
 
-        if remaining_all['source_id'].iloc[-1].lstrip() in message:
+        if remaining_all['source_id'][-1] in message:
             # all sources have been received by the processing nodes
             # begin processing time
             logger.info("Receipt of all {} remaining targets confirmed by processing nodes"
-                        .format(len(remaining_all.index)))
+                        .format(len(remaining_all.get('source_id'))))
             # write_pair_redis(self.redis_server,
             #                  "{}:current_obs:proc_start_time".format(product_id),
             #                  str(datetime.now()))
 
-        elif remaining_all['source_id'].head(64).iloc[-1].lstrip() in message:
+        elif remaining_64['source_id'][-1] in message:
             # 64 sources have been received by the processing nodes
             # begin processing time
             logger.info("Receipt of next 64 targets confirmed by processing nodes")
@@ -932,8 +922,9 @@ class Listen(threading.Thread):
                 file_id = 'filler_file_id'
 
                 # TODO: Change this to handle specific pointing in subarray
-                targets = pd.read_csv(StringIO(self._get_sensor_value(product_id, "current_obs:processing_64")),
-                                      sep=",", index_col=0)
+                targets = pd.DataFrame.from_dict(
+                    json.loads(self._get_sensor_value(product_id, "current_obs:processing_64")))
+
                 self.engine.add_sources_to_db(targets, start, end, proxies, antennas, n_antennas, file_id, bands)
 
     def _beam_radius(self, current_freq, dish_size=13.5):
@@ -974,22 +965,26 @@ class Listen(threading.Thread):
             None
         """
 
-        columns = ['source_id', 'ra', 'decl', 'priority']
-
-        targ_dict = targets.loc[:, columns].to_dict('list')
+        # columns = ['source_id', 'ra', 'decl', 'priority']
+        #
+        # targ_dict = targets.loc[:, columns].to_dict('list')
+        # targ_dict_64 = targets.head(64).loc[:, columns].to_dict('list')
         key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
         key_current_obs = '{}:current_obs:remaining_to_process'.format(product_id)
         key_64 = '{}:current_obs:processing_64'.format(product_id)
-        write_pair_redis(self.redis_server, key, json.dumps(targ_dict))
-        remaining_to_process = pd.DataFrame.to_csv(targets)
-        write_pair_redis(self.redis_server, key_current_obs, remaining_to_process)
-        processing_64 = pd.DataFrame.to_csv(targets.head(64))
-        write_pair_redis(self.redis_server, key_64, processing_64)
+
+        first_64 = {k: v[:64] for k, v in targets.items()}
+
+        write_pair_redis(self.redis_server, key, json.dumps(targets))
+        write_pair_redis(self.redis_server, key_current_obs, json.dumps(targets))
+        write_pair_redis(self.redis_server, key_64, json.dumps(first_64))
 
         channel = "bluse:///set"
         publish(self.redis_server, channel, key)
 
-        logger.info('{} of {} targets published to {}'.format(len(targets.head(64).index), len(targets.index), channel))
+        logger.info('{} of {} targets published to {}'.format(len(first_64.get('source_id')),
+                                                              len(targets.get('source_id')), channel))
+        # logger.info("Targets to publish:\n\n{}\n".format(targets.head(64)))
 
     def pointing_coords(self, t_str):
         """Function used to clean up run loop and parse pointing information

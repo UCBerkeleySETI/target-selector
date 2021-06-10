@@ -23,13 +23,15 @@ from argparse import (
 )
 
 # link to 26m star table
-data_link = 'https://www.dropbox.com/s/hxk6pxqdw1gyp3h/1_million_sample_complete.csv?dl=1'
+data_link = '/Users/Bart/Downloads/master_gaia_database.csv'
+# https://www.dropbox.com/s/hxk6pxqdw1gyp3h/1_million_sample_complete.csv?dl=1 # 1m table
+# https://www.dropbox.com/s/maod2e0v5w9nogt/master_gaia_database.csv?dl=1 # 26m table
 
 # link to ad-hoc table 
-data_link_adhoc = 'https://www.dropbox.com/s/1o9cagoxuqzaqrs/adhoc.csv?dl=1'
+data_link_adhoc = '/Users/Bart/Downloads/adhoc.csv'
 
 # link to exotica table 
-data_link_ex = 'https://www.dropbox.com/s/idv3gae73p6ba87/exotica.csv?dl=1'
+data_link_ex = '/Users/Bart/Downloads/exotica.csv'
 
 Base = declarative_base()
 class Observation(Base):

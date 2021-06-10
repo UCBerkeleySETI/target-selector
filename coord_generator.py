@@ -1,12 +1,14 @@
 import time
 import json
 import redis
+import codecs
 import numpy as np
 import yaml
 import re
 import pandas as pd
 from io import StringIO
-from datetime import datetime 
+from datetime import datetime
+from functools import reduce
 from random import seed
 from random import randint
 from random import choice
@@ -103,8 +105,8 @@ with open('random_seed.csv') as f:
                 if final_messages[i+4].endswith('True'):
                     print(chnls[i], final_messages[i])
                     r.publish(chnls[i], final_messages[i])
-                    print("Observing for 10 seconds...")
-                    time.sleep(10)
+                    print("Observing for 5 minutes...")
+                    time.sleep(300)
                 # try:
                 #     key_glob_remaining = '*:*:remaining_to_process'
                 #     for j in r.scan_iter(key_glob_remaining):
@@ -122,9 +124,7 @@ with open('random_seed.csv') as f:
                     for k in r.scan_iter(key_glob):
                         time.sleep(0.05)
                         product_id = (str(k)[1:].replace("\'", "")).split(':')[0]
-                        targets = str(r.get(k), 'utf-8')
-                        data = pd.read_csv(
-                            StringIO(targets), sep=",", index_col=0)
+                        data = pd.DataFrame.from_dict(json.loads(r.get(k).decode("utf-8")))
                         print("\n{}\n".format(data))
                         # df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
                         # targetsFinal = df.transpose()
