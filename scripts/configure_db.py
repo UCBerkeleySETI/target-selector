@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
-'''
+"""
 This script is pretty slow for creating the database. Will work on adding support
 for bulk inserting data from csv file in the future.
-'''
+"""
 
 import os
 import yaml
@@ -34,12 +34,14 @@ data_link_adhoc = '/Users/Bart/Downloads/adhoc.csv'
 data_link_ex = '/Users/Bart/Downloads/exotica.csv'
 
 Base = declarative_base()
+
+
 class Observation(Base):
     """Observation table data schema. Stores information on the status of the
        observation.
     """
     __tablename__ = 'observation_status'
-    rowid = Column(INT, primary_key = True)
+    rowid = Column(INT, primary_key=True)
     source_id = Column(BIGINT)
     antennas = Column(Text)
     n_antennas = Column(INT)
@@ -50,6 +52,7 @@ class Observation(Base):
     mode = Column(INT)
     time = Column(TIMESTAMP)
     processed = Column(Text)
+
 
 def cli(prog=sys.argv[0]):
     usage = "{} [options]".format(prog)
@@ -77,12 +80,13 @@ def cli(prog=sys.argv[0]):
     args = parser.parse_args()
     password = getpass('Password for {}@{}: '.format(args.username, args.host))
 
-    main(user = args.username,
-         password = password,
-         host = args.host,
-         schema_name = args.database)
+    main(user=args.username,
+         password=password,
+         host=args.host,
+         schema_name=args.database)
 
-def write_yaml(cred, filename = 'config.yml'):
+
+def write_yaml(cred, filename='config.yml'):
     data = {"mysql": cred}
 
     if os.path.basename(os.getcwd()) == 'scripts':
@@ -91,6 +95,7 @@ def write_yaml(cred, filename = 'config.yml'):
 
     with open(filename, 'w') as outfile:
         yaml.dump(data, outfile, default_flow_style=False)
+
 
 def main(user, password, host, schema_name):
     cred = {'username': user, 'host': 'localhost', 'password': password,
@@ -101,7 +106,7 @@ def main(user, password, host, schema_name):
     adhoc_table_name = 'adhoc_list'
     exotica_table_name = 'exotica_list'
     url = URL(**cred)
-    engine = create_engine(name_or_url = url)
+    engine = create_engine(name_or_url=url)
     engine.execute('CREATE DATABASE IF NOT EXISTS {};'.format(schema_name))
     engine.execute('USE {};'.format(schema_name))
 
@@ -111,7 +116,7 @@ def main(user, password, host, schema_name):
 
     # Create observation status table
     if not engine.dialect.has_table(engine, obs_table_name):
-        print ('Creating table: {}'.format(obs_table_name))
+        print('Creating table: {}'.format(obs_table_name))
         Base.metadata.create_all(engine)
     else:
         engine.execute('DROP TABLE {}.{}'.format(schema_name, obs_table_name))
@@ -119,46 +124,50 @@ def main(user, password, host, schema_name):
 
     # Create adhoc sources table
     if not engine.dialect.has_table(engine, adhoc_table_name):
-        print ('Creating table: {}'.format(adhoc_table_name))
+        print('Creating table: {}'.format(adhoc_table_name))
         tb = pd.read_csv(data_link_adhoc)
         tb['project'] = np.nan
         tb['dist_c'] = np.nan
-        tb.to_sql(adhoc_table_name, engine, index = False,
-                  if_exists = 'replace', chunksize = None, dtype={'source_id': VARCHAR(45)})
-        engine.execute('CREATE INDEX target_list_loc_idx ON \
-                        {}.{} (ra, decl)'.format(schema_name, adhoc_table_name))
+        tb.to_sql(adhoc_table_name, engine, index=False,
+                  if_exists='replace', chunksize=None, dtype={'source_id': VARCHAR(45)})
         del tb
+        # engine.execute('CREATE INDEX target_list_loc_idx ON \
+        #                 {}.{} (ra, decl)'.format(schema_name, adhoc_table_name))
+        engine.execute('ALTER TABLE {}.{} ADD INDEX idx_ra_decl (ra, decl);'.format(schema_name, adhoc_table_name))
 
     else:
-        print ('Table with the name, {}, already exists. Could not create table.'.format(adhoc_table_name))
+        print('Table with the name, {}, already exists. Could not create table.'.format(adhoc_table_name))
 
     # Create exotica sources table
     if not engine.dialect.has_table(engine, exotica_table_name):
-        print ('Creating table: {}'.format(exotica_table_name))
+        print('Creating table: {}'.format(exotica_table_name))
         tb = pd.read_csv(data_link_ex)
         tb['project'] = np.nan
         tb['dist_c'] = np.nan
-        tb.to_sql(exotica_table_name, engine, index = False,
-                  if_exists = 'replace', chunksize = None, dtype={'source_id': VARCHAR(45)})
-        engine.execute('CREATE INDEX target_list_loc_idx ON \
-                        {}.{} (ra, decl)'.format(schema_name, exotica_table_name))
+        tb.to_sql(exotica_table_name, engine, index=False,
+                  if_exists='replace', chunksize=None, dtype={'source_id': VARCHAR(45)})
         del tb
+        # engine.execute('CREATE INDEX target_list_loc_idx ON \
+        #                 {}.{} (ra, decl)'.format(schema_name, exotica_table_name))
+        engine.execute('ALTER TABLE {}.{} ADD INDEX idx_ra_decl (ra, decl);'.format(schema_name, exotica_table_name))
 
     else:
-        print ('Table with the name, {}, already exists. Could not create table.'.format(exotica_table_name))
+        print('Table with the name, {}, already exists. Could not create table.'.format(exotica_table_name))
 
     # Create 26m targets table
     if not engine.dialect.has_table(engine, source_table_name):
-        print ('Creating table: {}'.format(source_table_name))
+        print('Creating table: {}'.format(source_table_name))
         tb = pd.read_csv(data_link)
-        tb.to_sql(source_table_name, engine, index = False,
-                  if_exists = 'replace', chunksize = None, dtype={'source_id': VARCHAR(45)})
-        engine.execute('CREATE INDEX target_list_loc_idx ON \
-                        {}.{} (ra, decl)'.format(schema_name, source_table_name))
+        tb.to_sql(source_table_name, engine, index=False,
+                  if_exists='replace', chunksize=None, dtype={'source_id': VARCHAR(45)})
+        # engine.execute('CREATE INDEX target_list_loc_idx ON \
+        #                 {}.{} (ra, decl)'.format(schema_name, source_table_name))
         del tb
+        engine.execute('ALTER TABLE {}.{} ADD INDEX idx_ra_decl (ra, decl);'.format(schema_name, source_table_name))
 
     else:
-        print ('Table with the name, {}, already exists. Could not create table.'.format(source_table_name))
+        print('Table with the name, {}, already exists. Could not create table.'.format(source_table_name))
+
 
 if __name__ == '__main__':
     cli()

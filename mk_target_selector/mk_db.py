@@ -260,13 +260,13 @@ class Triage(DatabaseHandler):
 
         query = """
                 SELECT {cols}
-                FROM {table}
+                FROM exotica_list
                 UNION ALL
                 SELECT {cols}
                 FROM adhoc_list
                 UNION ALL
                 SELECT {cols}
-                FROM exotica_list
+                FROM {table}
                 WHERE ({ra_min} < ra  AND ra < {ra_max}) AND
                       ({dec_min} < decl AND decl < {dec_max})
                 """.format(cols=', '.join(cols), table=table,
