@@ -210,8 +210,7 @@ class Triage(DatabaseHandler):
         intensive search
 
         Reference:
-            #document 404s
-            http://janmatuschek.de/LatitudeLongitudeBoundingCoordinate
+            http://janmatuschek.de/LatitudeLongitudeBoundingCoordinates
 
         Parameters:
             c_ra, c_dec: (float)
@@ -415,6 +414,8 @@ class Triage(DatabaseHandler):
                 COS({c_dec}) * COS({c_ra} - RADIANS(ra))) < {beam_rad}; \
                 """.format(mask=mask, c_ra=c_ra,
                            c_dec=c_dec, beam_rad=beam_rad)
+
+        logger.info("\n{}\n".format(query))
 
         # if not check_flag:
         #     logger.info('Query:\n {}\n'.format(query))

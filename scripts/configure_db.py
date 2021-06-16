@@ -134,6 +134,7 @@ def main(user, password, host, schema_name):
         # engine.execute('CREATE INDEX target_list_loc_idx ON \
         #                 {}.{} (ra, decl)'.format(schema_name, adhoc_table_name))
         engine.execute('ALTER TABLE {}.{} ADD INDEX idx_ra_decl (ra, decl);'.format(schema_name, adhoc_table_name))
+        engine.execute('ALTER TABLE {}.{} ADD INDEX idx_decl_ra (decl, ra);'.format(schema_name, adhoc_table_name))
 
     else:
         print('Table with the name, {}, already exists. Could not create table.'.format(adhoc_table_name))
@@ -150,6 +151,7 @@ def main(user, password, host, schema_name):
         # engine.execute('CREATE INDEX target_list_loc_idx ON \
         #                 {}.{} (ra, decl)'.format(schema_name, exotica_table_name))
         engine.execute('ALTER TABLE {}.{} ADD INDEX idx_ra_decl (ra, decl);'.format(schema_name, exotica_table_name))
+        engine.execute('ALTER TABLE {}.{} ADD INDEX idx_decl_ra (decl, ra);'.format(schema_name, exotica_table_name))
 
     else:
         print('Table with the name, {}, already exists. Could not create table.'.format(exotica_table_name))
@@ -164,6 +166,7 @@ def main(user, password, host, schema_name):
         #                 {}.{} (ra, decl)'.format(schema_name, source_table_name))
         del tb
         engine.execute('ALTER TABLE {}.{} ADD INDEX idx_ra_decl (ra, decl);'.format(schema_name, source_table_name))
+        engine.execute('ALTER TABLE {}.{} ADD INDEX idx_decl_ra (decl, ra);'.format(schema_name, source_table_name))
 
     else:
         print('Table with the name, {}, already exists. Could not create table.'.format(source_table_name))
