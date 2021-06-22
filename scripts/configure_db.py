@@ -118,9 +118,11 @@ def main(user, password, host, schema_name):
     if not engine.dialect.has_table(engine, obs_table_name):
         print('Creating table: {}'.format(obs_table_name))
         Base.metadata.create_all(engine)
+        engine.execute('ALTER TABLE {}.{} MODIFY source_id VARCHAR(45);'.format(schema_name, "observation_status"))
     else:
         engine.execute('DROP TABLE {}.{}'.format(schema_name, obs_table_name))
         Base.metadata.create_all(engine)
+        engine.execute('ALTER TABLE {}.{} MODIFY source_id VARCHAR(45);'.format(schema_name, "observation_status"))
 
     # Create adhoc sources table
     if not engine.dialect.has_table(engine, adhoc_table_name):

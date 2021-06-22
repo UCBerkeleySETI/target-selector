@@ -3,6 +3,8 @@ import json
 import yaml
 import time
 import threading
+import math
+import random
 import pandas as pd
 import numpy as np
 from io import StringIO
@@ -204,7 +206,7 @@ class Listen(threading.Thread):
                                                                                              .format(mode))),
                                            check_flag=check_flag)
 
-                columns = ['index', 'ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
+                columns = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
                 targ_dict = targets.loc[:, columns].to_dict('list')
 
                 if len(targets.index) == 0:
@@ -353,15 +355,18 @@ class Listen(threading.Thread):
                 # if (max_new_tbdfm < max_remaining_tbdfm) and (mean_new_priority <= mean_remaining_priority):
                 if max_new_tbdfm > max_remaining_tbdfm:
                     self.abort_criteria(product_id)
-                    self.fetch_data(product_id, mode="current_obs")
+                    write_pair_redis(self.redis_server, "{}:current_obs:coords".format(product_id),
+                                     self._get_sensor_value(product_id, "new_obs:coords"))
+                    write_pair_redis(self.redis_server, "{}:current_obs:frequency".format(product_id),
+                                     self._get_sensor_value(product_id, "new_obs:frequency"))
+                    write_pair_redis(self.redis_server, "{}:current_obs:pool_resources".format(product_id),
+                                     self._get_sensor_value(product_id, "new_obs:pool_resources"))
+                    write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id),
+                                     self._get_sensor_value(product_id, "new_obs:target_list"))
+
                     if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
                         sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
                         pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
-                        pulled_coords = self._get_sensor_value(product_id, "current_obs:coords")
-                        pulled_freq = self.engine.freq_format(
-                            self._get_sensor_value(product_id, "current_obs:frequency"))
-                        # logger.info("Targets to publish for {} at {}:\n\n{}\n".format(pulled_coords,
-                        #                                                               pulled_freq, targets_to_publish))
 
                         obs_start_time = datetime.now()
                         write_pair_redis(self.redis_server,
@@ -369,8 +374,6 @@ class Listen(threading.Thread):
 
                         self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
-                # elif (max_new_tbdfm >= max_remaining_tbdfm) \
-                #         or (mean_new_priority > mean_remaining_priority):
                 elif max_new_tbdfm <= max_remaining_tbdfm:
                     logger.info("New pointing does not contain sources with a higher maximum achievable TBDFM "
                                 "parameter. Abort criteria not met. Continuing")
@@ -543,7 +546,7 @@ class Listen(threading.Thread):
 
         product_id = message.split(':')[0]
         sensor_name = message.split(':')[-1]
-        source_id = sensor_name.split('_')[-1]
+        source_id = sensor_name.split('source_id_')[1]
 
         # update observation_status with success message
         self.engine.update_obs_status(source_id,
@@ -554,9 +557,9 @@ class Listen(threading.Thread):
 
         target_list = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
         remaining_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
-        number_to_process = len(target_list.get('source_id'))
-        number_processed = target_list.get('source_id').index(source_id) + 1
-        number_remaining = len(remaining_64.get('source_id'))
+        number_to_process = len(target_list['source_id'])
+        number_processed = target_list['source_id'].index(source_id) + 1
+        number_remaining = len(remaining_64['source_id'])
         fraction_processed = number_processed / number_to_process
 
         # remaining_list = pd.read_csv(
@@ -573,10 +576,10 @@ class Listen(threading.Thread):
 
         # FIND INDEX WHERE SOURCE_ID == SOURCE_ID
         target_list = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
-        index_to_rm = target_list.get('source_id').index(source_id)
+        index_to_rm = target_list['source_id'].index(source_id)
 
         # REMOVE INDEX FROM LISTS UNDER ALL KEYS
-        keys = ['index', 'ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
+        keys = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
         for i in keys:
             to_rm = target_list.get(i)
             del to_rm[index_to_rm]
@@ -965,26 +968,59 @@ class Listen(threading.Thread):
             None
         """
 
-        # columns = ['source_id', 'ra', 'decl', 'priority']
-        #
-        # targ_dict = targets.loc[:, columns].to_dict('list')
-        # targ_dict_64 = targets.head(64).loc[:, columns].to_dict('list')
         key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
         key_current_obs = '{}:current_obs:remaining_to_process'.format(product_id)
         key_64 = '{}:current_obs:processing_64'.format(product_id)
 
         first_64 = {k: v[:64] for k, v in targets.items()}
+        init_targets = len(first_64['source_id'])
+        n_spare = 64 - init_targets
+        if n_spare >= 1:
+            coords = self._get_sensor_value(product_id, "current_obs:coords")
+            c_ra = math.radians(float(coords.split(", ")[0]))
+            c_dec = math.radians(float(coords.split(", ")[1]))
+            beam_rad = self._beam_radius(self._get_sensor_value(product_id, "current_obs:frequency"))
+            for n in range(1, n_spare + 1):
+                # random angle
+                alpha = 2 * math.pi * random.random()
+                # random radius
+                u = random.random() + random.random()
+                r = beam_rad * (2 - u if u > 1 else u)
+                # calculating coordinates
+                x = r * math.cos(alpha) + c_ra
+                if x > math.pi:
+                    x = x - (2 * math.pi)
+                y = r * math.sin(alpha) + c_dec
+                source_id = "spare_{}_{}".format(math.degrees(x), math.degrees(y))
+                first_64['source_id'].append(source_id)
+                first_64['ra'].append(math.degrees(x))
+                first_64['decl'].append(math.degrees(y))
+                first_64['dist_c'].append(0)
+                first_64['priority'].append(7)
+                first_64['table_name'].append('spare_beams')
 
-        write_pair_redis(self.redis_server, key, json.dumps(targets))
-        write_pair_redis(self.redis_server, key_current_obs, json.dumps(targets))
-        write_pair_redis(self.redis_server, key_64, json.dumps(first_64))
+        # logger.info("{}".format(len(first_64['source_id'])))
+        # logger.info("{}".format(len(first_64['ra'])))
+        # logger.info("{}".format(len(first_64['decl'])))
+        # logger.info("{}".format(len(first_64['dist_c'])))
+        # logger.info("{}".format(len(first_64['priority'])))
+        # logger.info("{}".format(len(first_64['table_name'])))
 
         channel = "bluse:///set"
-        publish(self.redis_server, channel, key)
 
-        logger.info('{} of {} targets published to {}'.format(len(first_64.get('source_id')),
-                                                              len(targets.get('source_id')), channel))
-        # logger.info("Targets to publish:\n\n{}\n".format(targets.head(64)))
+        write_pair_redis(self.redis_server, key, json.dumps(targets))
+        write_pair_redis(self.redis_server, key_64, json.dumps(first_64))
+
+        if n_spare >= 1:
+            logger.info('{} of {} targets plus {} random coordinates for spare beams published to {}'
+                        .format(init_targets, len(targets.get('source_id')), n_spare, channel))
+            write_pair_redis(self.redis_server, key_current_obs, json.dumps(first_64))
+            write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id), json.dumps(first_64))
+        elif n_spare < 1:
+            logger.info('{} of {} targets published to {}'
+                        .format(init_targets, len(targets.get('source_id')), channel))
+            write_pair_redis(self.redis_server, key_current_obs, json.dumps(targets))
+        publish(self.redis_server, channel, key)
 
     def pointing_coords(self, t_str):
         """Function used to clean up run loop and parse pointing information

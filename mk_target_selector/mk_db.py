@@ -199,7 +199,7 @@ class Triage(DatabaseHandler):
         update = """\
                     UPDATE {table}
                     SET processed = {processed}
-                    WHERE (source_id = {id} AND time = '{time}');
+                    WHERE (source_id = '{id}' AND time = '{time}');
                  """.format(table=table, id=source_id,
                             time=parser.parse(obs_start_time),
                             processed=processed)
@@ -422,6 +422,7 @@ class Triage(DatabaseHandler):
 
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con=self.conn)
+
         sorting_priority = self.triage(tb, current_freq)
         target_list = sorting_priority.sort_values(by=['priority', 'dist_c']).reset_index()
         # self.output_targets(target_list, c_ra, c_dec, current_freq)
