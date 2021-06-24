@@ -306,6 +306,8 @@ class Listen(threading.Thread):
                 write_pair_redis(self.redis_server,
                                  "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
+                self.beam_number(product_id)
+
                 self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
         elif pStatus.proc_status == "processing":
@@ -371,6 +373,8 @@ class Listen(threading.Thread):
                         obs_start_time = datetime.now()
                         write_pair_redis(self.redis_server,
                                          "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
+
+                        self.beam_number(product_id)
 
                         self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
@@ -607,6 +611,7 @@ class Listen(threading.Thread):
                         "Writing next {} to {}:current_obs:processing_64"
                         .format(len(processing_64.get('source_id')), product_id))
             next_64 = {k: v[:64] for k, v in remaining.items()}
+            self.beam_number(product_id)
             self._publish_targets(remaining, product_id)
             write_pair_redis(self.redis_server, "{}:current_obs:processing_64".format(product_id), json.dumps(next_64))
             self.store_metadata(product_id, mode="next_64")
@@ -1076,6 +1081,84 @@ class Listen(threading.Thread):
             logger.warning('Parsing sensor name failed. Unrecognized message '
                            'style: {}'.format(message))
             return False
+
+    def beam_number(self, product_id):
+        """Function to calculate the maximum number of targets observable with 64 beams
+
+        Parameters:
+            product_id: (str)
+                ASDF
+
+        Returns:
+            ASDF: (float)
+                ASDF
+        """
+
+        # pointing_coords = self._get_sensor_value(product_id, "current_obs:coords")
+        # pointing_ra, pointing_dec = pointing_coords.split(", ")
+
+        pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
+        entries_to_remove = ('source_id', 'priority', 'table_name', 'dist_c')
+        for k in entries_to_remove:
+            pulled_targets.pop(k, None)
+
+        targets = pd.DataFrame.from_dict(pulled_targets)
+        points = []
+
+        for n in targets.index:
+            targets['ra'][n] = Angle(targets['ra'][n] * u.deg).wrap_at(360 * u.deg).degree
+            coords = (round(targets['ra'][n], 4), round(targets['decl'][n], 4))
+            points.append(coords)
+
+        obs_freq = self._get_sensor_value(product_id, "current_obs:frequency")
+        beamform_rad = ((2.998e8 / float(obs_freq)) / 1000) * 180 / math.pi
+
+        total_circles = []
+
+        for n in points:
+            x_point = Angle(n[0] * u.deg).wrap_at(360 * u.deg).degree
+            y_point = n[1]
+            for i in range(1, 11):
+                r_new = np.random.uniform(0, beamform_rad)
+                x_max = Angle((x_point + r_new) * u.deg).wrap_at(360 * u.deg).degree
+                x_min = Angle((x_point - r_new) * u.deg).wrap_at(360 * u.deg).degree
+                x_new = np.random.uniform(x_min, x_max)
+                # (x_new - x_point)**2 + (y - y_point)**2 = r_new**2
+                y_new = np.sqrt((r_new ** 2) - ((x_new - x_point)**2)) + y_point
+                contained_points = []
+                for m in points:
+                    x_point = Angle(m[0] * u.deg).wrap_at(360 * u.deg).degree
+                    y_point = m[1]
+                    if ((x_point - x_new) ** 2) + ((y_point - y_new) ** 2) <= (beamform_rad ** 2):
+                        contained_points.append(m)
+                logger.info("{} points contained within circle centre ({}, {}) of radius {} degrees"
+                            .format(len(contained_points), x_new, y_new, beamform_rad))
+                total_circles.append([x_new, y_new, len(contained_points), contained_points])
+
+        circles_df = pd.DataFrame(sorted(total_circles, key=lambda x: x[2], reverse=True),
+                                  columns=['ra', 'decl', 'n_contained', 'contained'])
+
+        circles_containing = []
+        while len(points) != 0:
+            # logger.info("\n\n{}\n".format(circles_df))
+            for p in range(0, len(circles_df['contained'][0])):
+                covered = circles_df['contained'][0][p]
+                circles_containing.append([circles_df['ra'][0], circles_df['decl'][0], covered])
+                for q in range(0, len(circles_df.index)):
+                    if covered in circles_df['contained'][q]:
+                        circles_df['contained'][q].remove(covered)
+                        circles_df.loc[q, 'n_contained'] = len(circles_df['contained'][q])
+                if covered in points:
+                    points.remove(covered)
+            circles_df = circles_df.sort_values('n_contained', ascending=False).reset_index(drop=True)
+            circles_df = circles_df[circles_df['n_contained'] != 0]
+        points_df = pd.DataFrame(circles_containing, columns=['circle_ra', 'circle_dec', 'point_coord'])
+        logger.info("\n\n{}\n".format(points_df))
+        logger.info("{} visible targets can be observed with a minimum of {} beams"
+                    .format(len(targets.index), points_df['circle_ra'].nunique()))
+
+        # POSSIBLY WHEN INCLUDING PRIORITY, ADD WEIGHTING TO CIRCLES
+        # MAKE SOME PLOTS TO VERIFY FUNCTIONALITY
 
     def _found_aliens(self):
         """You found aliens! Alerting slack
