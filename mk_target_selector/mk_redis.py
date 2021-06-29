@@ -1107,7 +1107,8 @@ class Listen(threading.Thread):
 
         for n in targets.index:
             targets['ra'][n] = Angle(targets['ra'][n] * u.deg).wrap_at(360 * u.deg).degree
-            coords = (round(targets['ra'][n], 4), round(targets['decl'][n], 4))
+            # coords = (round(targets['ra'][n], 4), round(targets['decl'][n], 4))
+            coords = (targets['ra'][n], targets['decl'][n])
             points.append(coords)
 
         obs_freq = self._get_sensor_value(product_id, "current_obs:frequency")
@@ -1120,13 +1121,19 @@ class Listen(threading.Thread):
             y_point = n[1]
             for i in range(1, 11):
                 r_new = np.random.uniform(0, beamform_rad)
-                x_max = Angle((x_point + r_new) * u.deg).wrap_at(360 * u.deg).degree
-                x_min = Angle((x_point - r_new) * u.deg).wrap_at(360 * u.deg).degree
-                x_new = np.random.uniform(x_min, x_max)
+                x_max_r = Angle((x_point + r_new) * u.deg).wrap_at(360 * u.deg).degree
+                x_min_r = Angle((x_point - r_new) * u.deg).wrap_at(360 * u.deg).degree
+                x_max = x_point + beamform_rad
+                x_min = x_point - beamform_rad
+                y_max = y_point + beamform_rad
+                y_min = y_point - beamform_rad
+                x_new = np.random.uniform(x_min_r, x_max_r)
                 # (x_new - x_point)**2 + (y - y_point)**2 = r_new**2
                 y_new = np.sqrt((r_new ** 2) - ((x_new - x_point)**2)) + y_point
                 contained_points = []
-                for m in points:
+                filtered_points = [item for item in points if not (item[0] > x_max or item[0] < x_min or
+                                                                   item[1] > y_max or item[1] < y_min)]
+                for m in filtered_points:
                     x_point = Angle(m[0] * u.deg).wrap_at(360 * u.deg).degree
                     y_point = m[1]
                     if ((x_point - x_new) ** 2) + ((y_point - y_new) ** 2) <= (beamform_rad ** 2):
@@ -1137,25 +1144,46 @@ class Listen(threading.Thread):
 
         circles_df = pd.DataFrame(sorted(total_circles, key=lambda x: x[2], reverse=True),
                                   columns=['ra', 'decl', 'n_contained', 'contained'])
+        circles_df.to_csv('circles_df_init.csv')
 
         circles_containing = []
         while len(points) != 0:
-            # logger.info("\n\n{}\n".format(circles_df))
-            for p in range(0, len(circles_df['contained'][0])):
-                covered = circles_df['contained'][0][p]
-                circles_containing.append([circles_df['ra'][0], circles_df['decl'][0], covered])
-                for q in range(0, len(circles_df.index)):
-                    if covered in circles_df['contained'][q]:
-                        circles_df['contained'][q].remove(covered)
-                        circles_df.loc[q, 'n_contained'] = len(circles_df['contained'][q])
+            if len(circles_df['contained'][0]) != 0:
+                covered = circles_df['contained'][0][0]
+                circles_containing_ra = [item[0] for item in circles_containing]
+                circles_containing.append([circles_df['ra'][0], circles_df['decl'][0],
+                                           covered, max(1, len(set(circles_containing_ra)) + 1)])
+                x_max = covered[0] + beamform_rad
+                x_min = covered[0] - beamform_rad
+                y_max = covered[1] + beamform_rad
+                y_min = covered[1] - beamform_rad
+                filtered_circles = circles_df[(circles_df['ra'] < x_max) & (circles_df['ra'] > x_min)
+                                             & (circles_df['decl'] < y_max) & (circles_df['decl'] > y_min)]\
+                    .reset_index(drop=True)
+                for q in range(0, len(filtered_circles.index)):
+                    circles_df = circles_df[(circles_df['ra'] != filtered_circles['ra'][q])
+                                            & (circles_df['decl'] != filtered_circles['decl'][q])]
+                    if covered in filtered_circles['contained'][q]:
+                        filtered_circles['contained'][q].remove(covered)
+                        filtered_circles.loc[q, 'n_contained'] = len(filtered_circles['contained'][q])
+                circles_df = pd.concat([filtered_circles, circles_df]).reset_index(drop=True)
                 if covered in points:
                     points.remove(covered)
-            circles_df = circles_df.sort_values('n_contained', ascending=False).reset_index(drop=True)
-            circles_df = circles_df[circles_df['n_contained'] != 0]
-        points_df = pd.DataFrame(circles_containing, columns=['circle_ra', 'circle_dec', 'point_coord'])
+                logger.info("Number of points remaining: {}".format(len(points)))
+            else:
+                circles_df = circles_df[circles_df['n_contained'] != 0]\
+                    .sort_values('n_contained', ascending=False)\
+                    .reset_index(drop=True)
+
+        points_df = pd.DataFrame(circles_containing, columns=['circle_ra', 'circle_dec', 'point_coord', 'n_circles'])
         logger.info("\n\n{}\n".format(points_df))
         logger.info("{} visible targets can be observed with a minimum of {} beams"
-                    .format(len(targets.index), points_df['circle_ra'].nunique()))
+                    .format(len(targets.index), points_df['n_circles'].max()))
+        circles_df.to_csv('circles_df_fin.csv')
+        points_df.to_csv('beamform_points.csv')
+        beamform_64 = points_df[points_df['n_circles'] <= 64]
+        logger.info("{} targets can be observed with {} beams"
+                    .format(len(beamform_64.index), beamform_64['n_circles'].max()))
 
         # POSSIBLY WHEN INCLUDING PRIORITY, ADD WEIGHTING TO CIRCLES
         # MAKE SOME PLOTS TO VERIFY FUNCTIONALITY
