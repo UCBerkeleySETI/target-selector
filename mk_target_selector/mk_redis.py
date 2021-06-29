@@ -1097,80 +1097,115 @@ class Listen(threading.Thread):
         # pointing_coords = self._get_sensor_value(product_id, "current_obs:coords")
         # pointing_ra, pointing_dec = pointing_coords.split(", ")
 
+        # get list of targets for pointing
         pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
+        # remove unnecessary columns
         entries_to_remove = ('source_id', 'priority', 'table_name', 'dist_c')
         for k in entries_to_remove:
             pulled_targets.pop(k, None)
-
+        # create dataframe
         targets = pd.DataFrame.from_dict(pulled_targets)
+        # initialise empty list to store coordinates for targets in pointing
         points = []
 
+        # iterate over targets adding coordinates to point list
         for n in targets.index:
             targets['ra'][n] = Angle(targets['ra'][n] * u.deg).wrap_at(360 * u.deg).degree
             # coords = (round(targets['ra'][n], 4), round(targets['decl'][n], 4))
             coords = (targets['ra'][n], targets['decl'][n])
             points.append(coords)
 
+        # observation frequency and beamform radius
         obs_freq = self._get_sensor_value(product_id, "current_obs:frequency")
         beamform_rad = ((2.998e8 / float(obs_freq)) / 1000) * 180 / math.pi
 
+        # initialise empty list to store metadata for created circles
         total_circles = []
 
         for n in points:
+            # get coordinates for point
             x_point = Angle(n[0] * u.deg).wrap_at(360 * u.deg).degree
             y_point = n[1]
             for i in range(1, 11):
+                # create 10 circles per point
+                # r_new is a random radius <= beamform_rad; hence each new generated circle with r_new will contain at
+                # least one point
                 r_new = np.random.uniform(0, beamform_rad)
+                # prefiltering boundary conditions to speed up operations
                 x_max_r = Angle((x_point + r_new) * u.deg).wrap_at(360 * u.deg).degree
                 x_min_r = Angle((x_point - r_new) * u.deg).wrap_at(360 * u.deg).degree
                 x_max = x_point + beamform_rad
                 x_min = x_point - beamform_rad
                 y_max = y_point + beamform_rad
                 y_min = y_point - beamform_rad
+                # select random x coordinate within bounds
                 x_new = np.random.uniform(x_min_r, x_max_r)
-                # (x_new - x_point)**2 + (y - y_point)**2 = r_new**2
+                # use circle equation [(x_new - x_point)**2 + (y_new - y_point)**2 = r_new**2] to calculate
+                # corresponding y coordinate
                 y_new = np.sqrt((r_new ** 2) - ((x_new - x_point)**2)) + y_point
+                # initialise empty list to store coordinates of points contained within the given circle
                 contained_points = []
+                # prefilter
                 filtered_points = [item for item in points if not (item[0] > x_max or item[0] < x_min or
                                                                    item[1] > y_max or item[1] < y_min)]
                 for m in filtered_points:
                     x_point = Angle(m[0] * u.deg).wrap_at(360 * u.deg).degree
                     y_point = m[1]
+                    # if a point is contained by the given circle, append contained_points with its coordinates
                     if ((x_point - x_new) ** 2) + ((y_point - y_new) ** 2) <= (beamform_rad ** 2):
                         contained_points.append(m)
                 logger.info("{} points contained within circle centre ({}, {}) of radius {} degrees"
                             .format(len(contained_points), x_new, y_new, beamform_rad))
+                # for each circle, append its coordinates, contained points & number of contained
+                # points to total_circles list
                 total_circles.append([x_new, y_new, len(contained_points), contained_points])
 
+        # create dataframe from total_circles list, sorted descending by number of points contained
         circles_df = pd.DataFrame(sorted(total_circles, key=lambda x: x[2], reverse=True),
                                   columns=['ra', 'decl', 'n_contained', 'contained'])
-        circles_df.to_csv('circles_df_init.csv')
 
+        # initialise empty list to store coordinates & points contained by most densely populated circles
         circles_containing = []
+        # while there are still targets to analyse,
         while len(points) != 0:
+            # if the top circle in the dataframe still contains unmarked points,
             if len(circles_df['contained'][0]) != 0:
+                # covered = the first coordinate pair stored
                 covered = circles_df['contained'][0][0]
+                # circles_containing_ra = list of RA values for all points stored in circles_containing
                 circles_containing_ra = [item[0] for item in circles_containing]
+                # append circles_containing with target and circle data from circles_df
                 circles_containing.append([circles_df['ra'][0], circles_df['decl'][0],
                                            covered, max(1, len(set(circles_containing_ra)) + 1)])
+                # prefiltering boundary conditions to speed up operations
                 x_max = covered[0] + beamform_rad
                 x_min = covered[0] - beamform_rad
                 y_max = covered[1] + beamform_rad
                 y_min = covered[1] - beamform_rad
+                # prefilter
                 filtered_circles = circles_df[(circles_df['ra'] < x_max) & (circles_df['ra'] > x_min)
                                              & (circles_df['decl'] < y_max) & (circles_df['decl'] > y_min)]\
                     .reset_index(drop=True)
+                # for each of the filtered circles,
                 for q in range(0, len(filtered_circles.index)):
+                    # remove those circles from the circles_df dataframe
                     circles_df = circles_df[(circles_df['ra'] != filtered_circles['ra'][q])
                                             & (circles_df['decl'] != filtered_circles['decl'][q])]
+                    # if the covered coordinates are contained by any other circle,
                     if covered in filtered_circles['contained'][q]:
+                        # remove them
                         filtered_circles['contained'][q].remove(covered)
+                        # update the number of contained points for each circle
                         filtered_circles.loc[q, 'n_contained'] = len(filtered_circles['contained'][q])
+                # concatenate circles_df with filtered_circles, the entries previously removed and amended
                 circles_df = pd.concat([filtered_circles, circles_df]).reset_index(drop=True)
+                # if the covered coordinates match a target in the pointing, remove this target from the points list
                 if covered in points:
                     points.remove(covered)
                 logger.info("Number of points remaining: {}".format(len(points)))
             else:
+                # remove circles with no remaining contained points from circles_df
+                # sort dataframe descending by number of points contained
                 circles_df = circles_df[circles_df['n_contained'] != 0]\
                     .sort_values('n_contained', ascending=False)\
                     .reset_index(drop=True)
@@ -1179,8 +1214,6 @@ class Listen(threading.Thread):
         logger.info("\n\n{}\n".format(points_df))
         logger.info("{} visible targets can be observed with a minimum of {} beams"
                     .format(len(targets.index), points_df['n_circles'].max()))
-        circles_df.to_csv('circles_df_fin.csv')
-        points_df.to_csv('beamform_points.csv')
         beamform_64 = points_df[points_df['n_circles'] <= 64]
         logger.info("{} targets can be observed with {} beams"
                     .format(len(beamform_64.index), beamform_64['n_circles'].max()))
