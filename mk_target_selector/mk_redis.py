@@ -948,7 +948,7 @@ class Listen(threading.Thread):
         """
 
         # TODO: change this to the real name
-        beam_rad = (2.998e8 / float(current_freq)) / dish_size
+        beam_rad = 0.5 * (2.998e8 / float(current_freq)) / dish_size
         return beam_rad
 
     def _publish_targets(self, targets, product_id, columns=None,
@@ -1117,7 +1117,7 @@ class Listen(threading.Thread):
 
         # observation frequency and beamform radius
         obs_freq = self._get_sensor_value(product_id, "current_obs:frequency")
-        beamform_rad = ((2.998e8 / float(obs_freq)) / 1000) * 180 / math.pi
+        beamform_rad = 0.5 * ((2.998e8 / float(obs_freq)) / 1000) * 180 / math.pi
 
         # initialise empty list to store metadata for created circles
         total_circles = []
@@ -1131,13 +1131,9 @@ class Listen(threading.Thread):
                 # r_new is a random radius <= beamform_rad; hence each new generated circle with r_new will contain at
                 # least one point
                 r_new = np.random.uniform(0, beamform_rad)
-                # prefiltering boundary conditions to speed up operations
+                # minimum and maximum RA coordinates for sources within r_new of the given point
                 x_max_r = Angle((x_point + r_new) * u.deg).wrap_at(360 * u.deg).degree
                 x_min_r = Angle((x_point - r_new) * u.deg).wrap_at(360 * u.deg).degree
-                x_max = x_point + beamform_rad
-                x_min = x_point - beamform_rad
-                y_max = y_point + beamform_rad
-                y_min = y_point - beamform_rad
                 # select random x coordinate within bounds
                 x_new = np.random.uniform(x_min_r, x_max_r)
                 # use circle equation [(x_new - x_point)**2 + (y_new - y_point)**2 = r_new**2] to calculate
@@ -1145,7 +1141,11 @@ class Listen(threading.Thread):
                 y_new = np.sqrt((r_new ** 2) - ((x_new - x_point)**2)) + y_point
                 # initialise empty list to store coordinates of points contained within the given circle
                 contained_points = []
-                # prefilter
+                # prefiltering boundary conditions to speed up operations
+                x_max = x_point + beamform_rad
+                x_min = x_point - beamform_rad
+                y_max = y_point + beamform_rad
+                y_min = y_point - beamform_rad
                 filtered_points = [item for item in points if not (item[0] > x_max or item[0] < x_min or
                                                                    item[1] > y_max or item[1] < y_min)]
                 for m in filtered_points:
