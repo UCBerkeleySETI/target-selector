@@ -307,7 +307,6 @@ class Listen(threading.Thread):
                                  "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
                 self.beam_number(product_id)
-
                 self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
         elif pStatus.proc_status == "processing":
@@ -375,7 +374,6 @@ class Listen(threading.Thread):
                                          "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
                         self.beam_number(product_id)
-
                         self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
                 elif max_new_tbdfm <= max_remaining_tbdfm:
@@ -1100,20 +1098,26 @@ class Listen(threading.Thread):
         # get list of targets for pointing
         pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
         # remove unnecessary columns
-        entries_to_remove = ('source_id', 'priority', 'table_name', 'dist_c')
+        entries_to_remove = ('table_name', 'dist_c')
         for k in entries_to_remove:
             pulled_targets.pop(k, None)
         # create dataframe
         targets = pd.DataFrame.from_dict(pulled_targets)
+        logger.info('\n\n{}\n'.format(targets))
         # initialise empty list to store coordinates for targets in pointing
         points = []
 
         # iterate over targets adding coordinates to point list
         for n in targets.index:
-            targets['ra'][n] = Angle(targets['ra'][n] * u.deg).wrap_at(360 * u.deg).degree
-            # coords = (round(targets['ra'][n], 4), round(targets['decl'][n], 4))
-            coords = (targets['ra'][n], targets['decl'][n])
-            points.append(coords)
+            # targets['ra'][n] = Angle(targets['ra'][n] * u.deg).wrap_at(360 * u.deg).degree
+            # coords = (targets['ra'][n], targets['decl'][n])
+            coords = (Angle(targets['ra'][n] * u.deg).wrap_at(360 * u.deg).degree, targets['decl'][n])
+            source_id = targets['source_id'][n]
+            priority = targets['priority'][n]
+            coords_id_priority = [coords, source_id, priority]
+            points.append(coords_id_priority)
+
+        points = pd.DataFrame(points, columns=['coords', 'source_id', 'priority'])
 
         # observation frequency and beamform radius
         obs_freq = self._get_sensor_value(product_id, "current_obs:frequency")
@@ -1122,10 +1126,10 @@ class Listen(threading.Thread):
         # initialise empty list to store metadata for created circles
         total_circles = []
 
-        for n in points:
+        for n in points.index:
             # get coordinates for point
-            x_point = Angle(n[0] * u.deg).wrap_at(360 * u.deg).degree
-            y_point = n[1]
+            x_point = Angle(points['coords'][n][0] * u.deg).wrap_at(360 * u.deg).degree
+            y_point = points['coords'][n][1]
             for i in range(1, 11):
                 # create 10 circles per point
                 # r_new is a random radius <= beamform_rad; hence each new generated circle with r_new will contain at
@@ -1141,28 +1145,40 @@ class Listen(threading.Thread):
                 y_new = np.sqrt((r_new ** 2) - ((x_new - x_point)**2)) + y_point
                 # initialise empty list to store coordinates of points contained within the given circle
                 contained_points = []
+                contained_score = []
                 # prefiltering boundary conditions to speed up operations
                 x_max = x_point + beamform_rad
                 x_min = x_point - beamform_rad
                 y_max = y_point + beamform_rad
                 y_min = y_point - beamform_rad
-                filtered_points = [item for item in points if not (item[0] > x_max or item[0] < x_min or
-                                                                   item[1] > y_max or item[1] < y_min)]
-                for m in filtered_points:
-                    x_point = Angle(m[0] * u.deg).wrap_at(360 * u.deg).degree
-                    y_point = m[1]
+                points['ra'], points['decl'] = zip(*points.coords)
+
+                # filtered_points = [item for item in points if not (item[0] > x_max or item[0] < x_min or
+                #                                                    item[1] > y_max or item[1] < y_min)]
+
+                filtered_points = points[(points['ra'] > x_min) & (points['ra'] < x_max)
+                                         & (points['decl'] > y_min) & (points['decl'] < y_max)]
+
+                n_contained = 1
+                for m in filtered_points.index:
+                    x_point = Angle(points['ra'][m] * u.deg).wrap_at(360 * u.deg).degree
+                    y_point = points['decl'][m]
                     # if a point is contained by the given circle, append contained_points with its coordinates
                     if ((x_point - x_new) ** 2) + ((y_point - y_new) ** 2) <= (beamform_rad ** 2):
-                        contained_points.append(m)
-                logger.info("{} points contained within circle centre ({}, {}) of radius {} degrees"
-                            .format(len(contained_points), x_new, y_new, beamform_rad))
+                        coords = (x_point, y_point)
+                        contained_points.append(coords)
+                        contained_score.append(n_contained ** (1/points['priority'][m]))
+                        n_contained += 1
+
+                logger.info("{} points in circle centre ({}, {}) of radius {} degrees (TBDFM_max = {})"
+                            .format(len(contained_points), x_new, y_new, beamform_rad, max(contained_score)))
                 # for each circle, append its coordinates, contained points & number of contained
                 # points to total_circles list
-                total_circles.append([x_new, y_new, len(contained_points), contained_points])
+                total_circles.append([x_new, y_new, len(contained_points), contained_points, max(contained_score)])
 
         # create dataframe from total_circles list, sorted descending by number of points contained
-        circles_df = pd.DataFrame(sorted(total_circles, key=lambda x: x[2], reverse=True),
-                                  columns=['ra', 'decl', 'n_contained', 'contained'])
+        circles_df = pd.DataFrame(sorted(total_circles, key=lambda x: x[4], reverse=True),
+                                  columns=['ra', 'decl', 'n_contained', 'contained', 'max_tbdfm'])
 
         # initialise empty list to store coordinates & points contained by most densely populated circles
         circles_containing = []
@@ -1174,9 +1190,10 @@ class Listen(threading.Thread):
                 covered = circles_df['contained'][0][0]
                 # circles_containing_ra = list of RA values for all points stored in circles_containing
                 circles_containing_ra = [item[0] for item in circles_containing]
+                circles_containing_ra.append(circles_df['ra'][0])
                 # append circles_containing with target and circle data from circles_df
                 circles_containing.append([circles_df['ra'][0], circles_df['decl'][0],
-                                           covered, max(1, len(set(circles_containing_ra)) + 1)])
+                                           covered, len(set(circles_containing_ra)), circles_df['max_tbdfm'][0]])
                 # prefiltering boundary conditions to speed up operations
                 x_max = covered[0] + beamform_rad
                 x_min = covered[0] - beamform_rad
@@ -1184,7 +1201,7 @@ class Listen(threading.Thread):
                 y_min = covered[1] - beamform_rad
                 # prefilter
                 filtered_circles = circles_df[(circles_df['ra'] < x_max) & (circles_df['ra'] > x_min)
-                                             & (circles_df['decl'] < y_max) & (circles_df['decl'] > y_min)]\
+                                              & (circles_df['decl'] < y_max) & (circles_df['decl'] > y_min)]\
                     .reset_index(drop=True)
                 # for each of the filtered circles,
                 for q in range(0, len(filtered_circles.index)):
@@ -1200,17 +1217,21 @@ class Listen(threading.Thread):
                 # concatenate circles_df with filtered_circles, the entries previously removed and amended
                 circles_df = pd.concat([filtered_circles, circles_df]).reset_index(drop=True)
                 # if the covered coordinates match a target in the pointing, remove this target from the points list
-                if covered in points:
-                    points.remove(covered)
-                logger.info("Number of points remaining: {}".format(len(points)))
+                # points = points[(points['ra'] != covered[0]) & (points['decl'] != covered[1])]
+                points = points[points['coords'] != covered]
+                logger.info("Number of points remaining: {}".format(len(points) + 1))
             else:
                 # remove circles with no remaining contained points from circles_df
                 # sort dataframe descending by number of points contained
                 circles_df = circles_df[circles_df['n_contained'] != 0]\
-                    .sort_values('n_contained', ascending=False)\
+                    .sort_values('max_tbdfm', ascending=False)\
                     .reset_index(drop=True)
 
-        points_df = pd.DataFrame(circles_containing, columns=['circle_ra', 'circle_dec', 'point_coord', 'n_circles'])
+        points_df = pd.DataFrame(circles_containing, columns=['circle_ra',
+                                                              'circle_dec',
+                                                              'point_coord',
+                                                              'n_circles',
+                                                              'max_tbdfm'])
         logger.info("\n\n{}\n".format(points_df))
         logger.info("{} visible targets can be observed with a minimum of {} beams"
                     .format(len(targets.index), points_df['n_circles'].max()))
