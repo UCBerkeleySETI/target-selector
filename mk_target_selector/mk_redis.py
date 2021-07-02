@@ -356,11 +356,12 @@ class Listen(threading.Thread):
                                                                  == max_remaining_tbdfm].index.values[0]+1
 
                 logger.info("Maximum TBDFM parameter (N_sources)^(1/priority) for {} targets in new pointing: "
-                            "{} ** 1/{} = {}"
+                            "{} / {} = {}"
                             .format(n_new_obs, max_new_tbdfm_num, max_new_tbdfm_prio, max_new_tbdfm))
                 logger.info("Maximum TBDFM parameter (N_sources)^(1/priority) for {} targets remaining to process: "
-                            "{} ** 1/{} = {}"
-                            .format(n_remaining_obs, max_remaining_tbdfm_num, max_remaining_tbdfm_prio, max_remaining_tbdfm))
+                            "{} / {} = {}"
+                            .format(n_remaining_obs, max_remaining_tbdfm_num, max_remaining_tbdfm_prio,
+                                    max_remaining_tbdfm))
 
                 # if (max_new_tbdfm < max_remaining_tbdfm) and (mean_new_priority <= mean_remaining_priority):
                 if max_new_tbdfm > max_remaining_tbdfm:
@@ -680,9 +681,9 @@ class Listen(threading.Thread):
         """
         # create empty array for TBDFM parameter values in the target list
         tbdfm_param = np.full(table.shape[0], 0, dtype=float)
-        # fill this array with the (N_sources)^(1/priority) value for each row
+        # fill this array with the (N_sources/priority) value for each row
         # table = table.sort_values('dist_c', ignore_index=True)
-        tbdfm_param[table.index] = np.float_power((table.index + 1), (1/table['priority']))
+        tbdfm_param[table.index] = (table.index + 1) / table['priority']
         # append this array to the target list dataframe
         table['tbdfm_param'] = tbdfm_param
         return table
@@ -1191,7 +1192,7 @@ class Listen(threading.Thread):
                     coords = (x_point, y_point)
                     contained_coords.append(coords)
                     contained_sources.append(source_id)
-                    contained_score.append(n_contained ** (1 / filtered_points[m].priority))
+                    contained_score.append(n_contained / filtered_points[m].priority)
                     n_contained += 1
 
             logger.info("{} points in circle centre ({}, {}) of radius {} degrees (TBDFM_max = {})"
