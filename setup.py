@@ -14,6 +14,7 @@ requires = [
     "mysqlclient>=1.4.4",
     "logger>=1.4"
 #    "matplotlib==2.2.5"
+    "scipy>=1.4.1"
 ]
 
 setuptools.setup(

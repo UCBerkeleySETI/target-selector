@@ -5,6 +5,8 @@ import time
 import threading
 import math
 import random
+import mip
+import smallestenclosingcircle
 import pandas as pd
 import numpy as np
 from io import StringIO
@@ -33,14 +35,6 @@ except ImportError:
                              delete_key)
 
 
-class Point(object):
-    def __init__(self, source_id, ra, decl, priority):
-        self.source_id = source_id
-        self.ra = ra
-        self.decl = decl
-        self.priority = priority
-
-
 class ProcessingStatus(object):
     def __init__(self, value):
         self._proc_status = value
@@ -59,6 +53,34 @@ class ProcessingStatus(object):
 
 
 pStatus = ProcessingStatus("ready")
+
+
+# One target of priority n is worth priority_decay targets of priority n+1.
+priority_decay = 10
+
+
+class Target(object):
+    """
+    We give each point an index based on its ordinal position in our input.
+    Otherwise the data is precisely the data provided in redis.
+    """
+
+    def __init__(self, index, source_id, ra, decl, priority, dist_c, table_name):
+        self.index = index
+        self.source_id = source_id
+        self.ra = ra
+        self.decl = decl
+        self.priority = priority
+        self.dist_c = dist_c
+        self.table_name = table_name
+
+        # Targets with a lower priority have a higher score.
+        # We are maximizing score of all targets.
+        # The maximum priority is 7.
+        self.score = int(priority_decay ** (7 - self.priority))
+
+
+successfully_processed = []
 
 
 class Listen(threading.Thread):
@@ -315,7 +337,6 @@ class Listen(threading.Thread):
                 write_pair_redis(self.redis_server,
                                  "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
-                self.beam_number(product_id)
                 self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
         elif pStatus.proc_status == "processing":
@@ -333,38 +354,22 @@ class Listen(threading.Thread):
                     self._get_sensor_value(product_id, "current_obs:remaining_to_process")))
                 appended_remaining = self.append_tbdfm(remaining_to_process)
 
-                # maximum achievable TBDFM parameter for sources in the new target list
-                max_new_tbdfm = appended_new['tbdfm_param'].max()
+                # total TBDFM parameter for sources in the new target list
+                tot_new_tbdfm = appended_new['tbdfm_param'].sum()
                 # number of sources in the new target list
                 n_new_obs = len(appended_new.index)
-                # the priority value for the maximum achievable TBDFM parameter for sources in the new target list
-                max_new_tbdfm_prio = appended_new.loc[appended_new['tbdfm_param']
-                                                      == max_new_tbdfm]['priority'].item()
-                # the N_sources value for the maximum achievable TBDFM parameter for sources in the new target list
-                max_new_tbdfm_num = appended_new.loc[appended_new['tbdfm_param']
-                                                     == max_new_tbdfm].index.values[0]+1
 
-                # maximum achievable TBDFM parameter for sources remaining to process
-                max_remaining_tbdfm = appended_remaining['tbdfm_param'].max()
+                # total TBDFM parameter for sources remaining to process
+                tot_remaining_tbdfm = appended_remaining['tbdfm_param'].sum()
                 # number of sources remaining to process
                 n_remaining_obs = len(appended_remaining.index)
-                # the priority value for the maximum achievable TBDFM parameter for sources remaining to process
-                max_remaining_tbdfm_prio = appended_remaining.loc[appended_remaining['tbdfm_param']
-                                                                  == max_remaining_tbdfm]['priority'].item()
-                # the N_sources value for the maximum achievable TBDFM parameter for sources remaining to process
-                max_remaining_tbdfm_num = appended_remaining.loc[appended_remaining['tbdfm_param']
-                                                                 == max_remaining_tbdfm].index.values[0]+1
 
-                logger.info("Maximum TBDFM parameter (N_sources)^(1/priority) for {} targets in new pointing: "
-                            "{} / {} = {}"
-                            .format(n_new_obs, max_new_tbdfm_num, max_new_tbdfm_prio, max_new_tbdfm))
-                logger.info("Maximum TBDFM parameter (N_sources)^(1/priority) for {} targets remaining to process: "
-                            "{} / {} = {}"
-                            .format(n_remaining_obs, max_remaining_tbdfm_num, max_remaining_tbdfm_prio,
-                                    max_remaining_tbdfm))
+                logger.info("Total TBDFM parameter Σ(10 ** (7 - priority)) for {} targets in new pointing = {}"
+                            .format(n_new_obs, tot_new_tbdfm))
+                logger.info("Total TBDFM parameter Σ(10 ** (7 - priority)) for {} targets remaining to process = {}"
+                            .format(n_remaining_obs, tot_remaining_tbdfm))
 
-                # if (max_new_tbdfm < max_remaining_tbdfm) and (mean_new_priority <= mean_remaining_priority):
-                if max_new_tbdfm > max_remaining_tbdfm:
+                if tot_new_tbdfm > tot_remaining_tbdfm:
                     self.abort_criteria(product_id)
                     write_pair_redis(self.redis_server, "{}:current_obs:coords".format(product_id),
                                      self._get_sensor_value(product_id, "new_obs:coords"))
@@ -383,11 +388,10 @@ class Listen(threading.Thread):
                         write_pair_redis(self.redis_server,
                                          "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
-                        self.beam_number(product_id)
                         self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
-                elif max_new_tbdfm <= max_remaining_tbdfm:
-                    logger.info("New pointing does not contain sources with a higher maximum achievable TBDFM "
+                elif tot_new_tbdfm <= tot_remaining_tbdfm:
+                    logger.info("New pointing does not contain sources with a higher total TBDFM "
                                 "parameter. Abort criteria not met. Continuing")
                     pass
 
@@ -569,59 +573,42 @@ class Listen(threading.Thread):
 
         target_list = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
         remaining_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
-        number_to_process = len(target_list['source_id'])
-        number_processed = target_list['source_id'].index(source_id) + 1
-        number_remaining = len(remaining_64['source_id'])
-        fraction_processed = number_processed / number_to_process
-
-        # remaining_list = pd.read_csv(
-        #     StringIO(
-        #         self._get_sensor_value(
-        #             product_id, "current_obs:remaining_to_process")),
-        #     sep=",", index_col=0, dtype={'source_id': str})
-        # remaining = remaining_list[remaining_list.source_id != str(source_id)].reset_index(drop=True)
-        # remaining_to_process = pd.DataFrame.to_csv(remaining)
-        # write_pair_redis(self.redis_server,
-        #                  "{}:current_obs:remaining_to_process".format(product_id), remaining_to_process)
-
-        # TODO: CHECK REDIS HASHES AND REDIS LISTS, check regex first
 
         # FIND INDEX WHERE SOURCE_ID == SOURCE_ID
-        target_list = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
-        index_to_rm = target_list['source_id'].index(source_id)
-
-        # REMOVE INDEX FROM LISTS UNDER ALL KEYS
-        keys = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
-        for i in keys:
-            to_rm = target_list.get(i)
-            del to_rm[index_to_rm]
-
+        remaining_all = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
+        if source_id in remaining_all['source_id']:
+            idx_to_rm_all = remaining_all['source_id'].index(source_id)
+            idx_to_rm_64 = remaining_64['source_id'].index(source_id)
+            # REMOVE INDEX FROM LISTS UNDER ALL KEYS
+            keys_all = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
+            for i in keys_all:
+                to_rm = remaining_all.get(i)
+                del to_rm[idx_to_rm_all]
+            keys_64 = ['circle_ra', 'circle_decl', 'source_id', 'dist_c', 'table_name', 'priority']
+            for j in keys_64:
+                to_rm = remaining_64.get(j)
+                del to_rm[idx_to_rm_64]
         write_pair_redis(
             self.redis_server,
-            "{}:current_obs:remaining_to_process".format(product_id), json.dumps(target_list))
-        remaining = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
-        processing_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
+            "{}:current_obs:remaining_to_process".format(product_id), json.dumps(remaining_all))
+        write_pair_redis(
+            self.redis_server,
+            "{}:current_obs:processing_64".format(product_id), json.dumps(remaining_64))
 
-        # proc_start_time = self._get_sensor_value(product_id, "current_obs:proc_start_time")
-        # time_elapsed = (datetime.now() - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
+        remaining_all = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
+        remaining_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
 
-        if number_processed == number_to_process:
-            logger.info("Successful processing of all {} remaining targets confirmed by processing nodes"
-                        .format(number_remaining))
+        if not len(remaining_all['source_id']):
+            logger.info("Successful processing of all remaining beamforming targets confirmed by processing nodes")
             self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info(
                 "-------------------------------------------------------------------------------------------------")
             logger.info("Processing state set to \'ready\'")
 
-        elif processing_64['source_id'][-1] in message:
-            logger.info("Successful processing of 64 targets confirmed by processing nodes. "
-                        "Writing next {} to {}:current_obs:processing_64"
-                        .format(len(processing_64.get('source_id')), product_id))
-            next_64 = {k: v[:64] for k, v in remaining.items()}
-            self.beam_number(product_id)
-            self._publish_targets(remaining, product_id)
-            write_pair_redis(self.redis_server, "{}:current_obs:processing_64".format(product_id), json.dumps(next_64))
+        elif not len(remaining_64['source_id']):
+            logger.info("Successful processing of 64 beamforming targets confirmed by processing nodes")
+            self._publish_targets(remaining_all, product_id)
             self.store_metadata(product_id, mode="next_64")
 
         # self.abort_criteria(product_id, time_elapsed, fraction_processed)
@@ -638,24 +625,36 @@ class Listen(threading.Thread):
         """
 
         product_id = message.split(':')[0]
+        source_id = message.split("acknowledge_source_id_")[1]
 
         # if message contains final target source_id,
-        remaining_all = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
-        remaining_64 = {k: v[:64] for k, v in remaining_all.items()}
+        remaining_all = pd.DataFrame.from_dict(
+            json.loads(self._get_sensor_value(product_id, "current_obs:unacknowledged_all")))
+        remaining_64 = pd.DataFrame.from_dict(
+            json.loads(self._get_sensor_value(product_id, "current_obs:unacknowledged_64")))
 
-        if remaining_all['source_id'][-1] in message:
+        remaining_all = remaining_all[remaining_all["source_id"] != source_id]\
+            .reset_index(drop=True).to_dict(orient="list")
+        remaining_64 = remaining_64[remaining_64["source_id"] != source_id]\
+            .reset_index(drop=True).to_dict(orient="list")
+
+        write_pair_redis(self.redis_server, "{}:current_obs:unacknowledged_all".format(product_id),
+                         json.dumps(remaining_all))
+        write_pair_redis(self.redis_server, "{}:current_obs:unacknowledged_64".format(product_id),
+                         json.dumps(remaining_64))
+
+        if not remaining_all['source_id']:
             # all sources have been received by the processing nodes
             # begin processing time
-            logger.info("Receipt of all {} remaining targets confirmed by processing nodes"
-                        .format(len(remaining_all.get('source_id'))))
+            logger.info("Receipt of all remaining targets confirmed by processing nodes")
             # write_pair_redis(self.redis_server,
             #                  "{}:current_obs:proc_start_time".format(product_id),
             #                  str(datetime.now()))
 
-        elif remaining_64['source_id'][-1] in message:
+        elif not remaining_64['source_id']:
             # 64 sources have been received by the processing nodes
             # begin processing time
-            logger.info("Receipt of next 64 targets confirmed by processing nodes")
+            logger.info("Receipt of next 64 beamforming coordinates confirmed by processing nodes")
             # write_pair_redis(self.redis_server,
             #                  "{}:current_obs:proc_start_time".format(product_id),
             #                  str(datetime.now()))
@@ -683,7 +682,9 @@ class Listen(threading.Thread):
         tbdfm_param = np.full(table.shape[0], 0, dtype=float)
         # fill this array with the (N_sources/priority) value for each row
         # table = table.sort_values('dist_c', ignore_index=True)
-        tbdfm_param[table.index] = (table.index + 1) / table['priority']
+
+        for q in table.index:
+            tbdfm_param[q] = int(10 ** (7 - table['priority'][q]))
         # append this array to the target list dataframe
         table['tbdfm_param'] = tbdfm_param
         return table
@@ -707,7 +708,7 @@ class Listen(threading.Thread):
         if (not fraction_processed) and (not observation_time):
             # processing aborted based on priority of new sources & optimising TBDFM values
             # (larger TBDFM = better)
-            logger.info("New pointing contains sources with a higher maximum achievable TBDFM parameter. Aborting")
+            logger.info("New pointing contains sources with a higher total TBDFM parameter. Aborting")
             # self._deconfigure(product_id)
             pStatus.proc_status = "ready"
             logger.info(
@@ -982,12 +983,18 @@ class Listen(threading.Thread):
         """
 
         key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
-        key_current_obs = '{}:current_obs:remaining_to_process'.format(product_id)
-        key_64 = '{}:current_obs:processing_64'.format(product_id)
+        key_all_remaining = '{}:current_obs:remaining_to_process'.format(product_id)
+        key_64_remaining = '{}:current_obs:processing_64'.format(product_id)
+        key_all_unacknowledged = '{}:current_obs:unacknowledged_all'.format(product_id)
+        key_64_unacknowledged = '{}:current_obs:unacknowledged_64'.format(product_id)
 
-        first_64 = {k: v[:64] for k, v in targets.items()}
-        init_targets = len(first_64['source_id'])
-        n_spare = 64 - init_targets
+        self.beam_number(product_id, targets)
+        beamform_beams = json.loads(self._get_sensor_value(product_id, "current_obs:beamform_beams"))
+        beamform_targets = json.loads(self._get_sensor_value(product_id, "current_obs:beamform_targets"))
+        init_coords = len(beamform_beams['ra'])
+        init_targets = len(beamform_targets['source_id'])
+
+        n_spare = 64 - init_coords
         if n_spare >= 1:
             coords = self._get_sensor_value(product_id, "current_obs:coords")
             c_ra = math.radians(float(coords.split(", ")[0]))
@@ -1005,34 +1012,41 @@ class Listen(threading.Thread):
                     x = x - (2 * math.pi)
                 y = r * math.sin(alpha) + c_dec
                 source_id = "spare_{}_{}".format(math.degrees(x), math.degrees(y))
-                first_64['source_id'].append(source_id)
-                first_64['ra'].append(math.degrees(x))
-                first_64['decl'].append(math.degrees(y))
-                first_64['dist_c'].append(0)
-                first_64['priority'].append(7)
-                first_64['table_name'].append('spare_beams')
+                beamform_beams['source_id'].append(source_id)
+                beamform_beams['ra'].append(math.degrees(x))
+                beamform_beams['decl'].append(math.degrees(y))
+                beamform_beams['contained_dist_c'].append(0)
+                beamform_beams['contained_priority'].append(7)
+                beamform_beams['contained_table'].append('spare_beams')
 
-        # logger.info("{}".format(len(first_64['source_id'])))
-        # logger.info("{}".format(len(first_64['ra'])))
-        # logger.info("{}".format(len(first_64['decl'])))
-        # logger.info("{}".format(len(first_64['dist_c'])))
-        # logger.info("{}".format(len(first_64['priority'])))
-        # logger.info("{}".format(len(first_64['table_name'])))
+                beamform_targets['source_id'].append(source_id)
+                beamform_targets['circle_ra'].append(math.degrees(x))
+                beamform_targets['circle_decl'].append(math.degrees(y))
+                beamform_targets['dist_c'].append(0)
+                beamform_targets['priority'].append(7)
+                beamform_targets['table_name'].append('spare_beams')
 
         channel = "bluse:///set"
 
         write_pair_redis(self.redis_server, key, json.dumps(targets))
-        write_pair_redis(self.redis_server, key_64, json.dumps(first_64))
+        write_pair_redis(self.redis_server, key_64_remaining, json.dumps(beamform_targets))
+        write_pair_redis(self.redis_server, key_64_unacknowledged, json.dumps(beamform_targets))
 
+        beamform_targets['ra'] = beamform_targets.pop('circle_ra')
+        beamform_targets['decl'] = beamform_targets.pop('circle_decl')
         if n_spare >= 1:
-            logger.info('{} of {} targets plus {} random coordinates for spare beams published to {}'
-                        .format(init_targets, len(targets.get('source_id')), n_spare, channel))
-            write_pair_redis(self.redis_server, key_current_obs, json.dumps(first_64))
-            write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id), json.dumps(first_64))
+            logger.info('{} beamforming coordinates containing {} of {} targets plus '
+                        '{} random coordinates for spare beams published to {}'
+                        .format(init_coords, init_targets, len(targets.get('source_id')), n_spare, channel))
+            write_pair_redis(self.redis_server, key_all_remaining, json.dumps(beamform_targets))
+            write_pair_redis(self.redis_server, key_all_unacknowledged, json.dumps(beamform_targets))
+            write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id),
+                             json.dumps(beamform_targets))
         elif n_spare < 1:
-            logger.info('{} of {} targets published to {}'
-                        .format(init_targets, len(targets.get('source_id')), channel))
-            write_pair_redis(self.redis_server, key_current_obs, json.dumps(targets))
+            logger.info('{} beamforming coordinates containing {} of {} targets published to {}'
+                        .format(init_coords, init_targets, len(targets.get('source_id')), channel))
+            write_pair_redis(self.redis_server, key_all_remaining, json.dumps(targets))
+            write_pair_redis(self.redis_server, key_all_unacknowledged, json.dumps(targets))
         publish(self.redis_server, channel, key)
 
     def pointing_coords(self, t_str):
@@ -1090,46 +1104,89 @@ class Listen(threading.Thread):
                            'style: {}'.format(message))
             return False
 
-    def beam_number(self, product_id):
+    def beam_number(self, product_id, targets):
         """Function to calculate the maximum number of targets observable with 64 beams
+
+        Thanks to:
+        https://github.com/lacker/targeter
 
         Parameters:
             product_id: (str)
+                ASDF
+            targets: (str)
                 ASDF
 
         Returns:
             ASDF: (float)
                 ASDF
         """
-
-        # get list of targets for pointing
-        pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
         # observation frequency and beamform radius
         obs_freq = self._get_sensor_value(product_id, "current_obs:frequency")
         beamform_rad = 0.5 * ((2.998e8 / float(obs_freq)) / 1000) * 180 / math.pi
 
+        class Circle(object):
+            """
+            A circle along with the set of Targets that is within it.
+            """
+
+            def __init__(self, ra, decl, targets):
+                self.ra = ra
+                self.decl = decl
+                self.targets = targets
+                self.recenter()
+
+            def key(self):
+                """
+                A tuple key encoding the targets list.
+                """
+                return tuple(t.index for t in self.targets)
+
+            def recenter(self):
+                """
+                Alter ra and decl to minimize the maximum distance to any point.
+                """
+                points = [(t.ra, t.decl) for t in self.targets]
+                x, y, r = smallestenclosingcircle.make_circle(points)
+                assert r < beamform_rad
+                self.ra, self.decl = x, y
+
         # Parse the json into Point objects for convenience
         points_db = [
-            Point(*args)
-            for args in zip(
-                pulled_targets["source_id"],
-                pulled_targets["ra"],
-                pulled_targets["decl"],
-                pulled_targets["priority"],
+            Target(index, *args)
+            for (index, args) in enumerate(
+                zip(
+                    targets["source_id"],
+                    targets["ra"],
+                    targets["decl"],
+                    targets["priority"],
+                    targets['dist_c'],
+                    targets['table_name']
+                )
             )
         ]
 
-        n_targets = len(points_db)
         arr = np.array([[p.ra, p.decl] for p in points_db])
         tree = KDTree(arr)
 
         # Find all pairs of points that could be captured by a single observation
         pairs = tree.query_pairs(2 * beamform_rad)
-        logger.info("There are {} pairs of points that can be captured with a single observation".format(len(pairs)))
+        logger.info("Of {} total remaining targets in the field of view,"
+                    " {} target pairs can be observed with a single formed beam".format(len(points_db), len(pairs)))
 
         # A list of (ra, decl) coordinates for the center of possible circles
         candidate_centers = []
 
+        # Add one center for each of the targets that aren't part of any pairs
+        in_a_pair = set()
+        for i, j in pairs:
+            in_a_pair.add(i)
+            in_a_pair.add(j)
+        for i in range(len(points_db)):
+            if i not in in_a_pair:
+                t = points_db[i]
+                candidate_centers.append((t.ra, t.decl))
+
+        # Add two centers for each pair of targets that are close to each other
         for i0, i1 in pairs:
             p0 = points_db[i0]
             p1 = points_db[i1]
@@ -1144,163 +1201,108 @@ class Listen(threading.Thread):
             except ValueError:
                 continue
 
-        logger.info("There are {} candidates for circle center coordinates".format(len(candidate_centers)))
-        candidate_neighbors = tree.query_ball_point(
-            candidate_centers, beamform_rad)
+        logger.info("Including targets insufficiently close to any others leaves"
+                    " {} candidates for beamforming coordinates".format(len(candidate_centers)))
+        candidate_target_indexes = tree.query_ball_point(candidate_centers, beamform_rad)
 
-        # Filter out any candidates whose neighbors are the same as a previous candidate
-        centers = []
-        neighbors = []
+        # Construct Circle objects.
+        # Filter out any circles whose included targets are the same as a previous circle
+        circles = []
         seen = set()
-        for c, neighbor_list in zip(candidate_centers, candidate_neighbors):
-            key = tuple(neighbor_list)
+        for (ra, decl), target_indexes in zip(candidate_centers, candidate_target_indexes):
+            targets = [points_db[i] for i in target_indexes]
+            circle = Circle(ra, decl, targets)
+            key = circle.key()
             if key in seen:
                 continue
             seen.add(key)
-            centers.append(c)
-            neighbors.append(neighbor_list)
+            circles.append(circle)
 
-        logger.info("After removing functional duplicates, there are {} possible circles".format(len(centers)))
+        logger.info("Removing functional duplicates leaves {} remaining candidates".format(len(circles)))
 
-        total_circles = []
-        for i in range(0, len(centers)):
-            # initialise empty list to store coordinates of points contained within the given circle
-            contained_coords = []
-            contained_sources = []
-            contained_score = []
-            # prefiltering boundary conditions to speed up operations
-            x_new = centers[i][0]
-            y_new = centers[i][1]
-            x_max = x_new + beamform_rad
-            x_min = x_new - beamform_rad
-            y_max = y_new + beamform_rad
-            y_min = y_new - beamform_rad
+        # We want to pick the set of circles that covers the most targets.
+        # This is the "maximum coverage problem".
+        # https://en.wikipedia.org/wiki/Maximum_coverage_problem
+        # We encode this as an integer linear program.
+        model = mip.Model(sense=mip.MAXIMIZE)
+        model.verbose = 0
 
-            filtered_points = [item for item in points_db
-                               if (item.ra > x_min)
-                               and (item.ra < x_max)
-                               and (item.decl > y_min)
-                               and (item.decl < y_max)]
+        # Variable t{n} is whether the nth target is covered
+        target_vars = [
+            model.add_var(name="t{n}", var_type=mip.BINARY) for n in range(len(points_db))
+        ]
 
-            n_contained = 1
-            for m in range(0, len(filtered_points)):
-                x_point = filtered_points[m].ra
-                y_point = filtered_points[m].decl
-                source_id = filtered_points[m].source_id
-                # if a point is contained by the given circle, append contained_points with its coordinates
-                if ((x_point - x_new) ** 2) + ((y_point - y_new) ** 2) <= (beamform_rad ** 2):
-                    coords = (x_point, y_point)
-                    contained_coords.append(coords)
-                    contained_sources.append(source_id)
-                    contained_score.append(n_contained / filtered_points[m].priority)
-                    n_contained += 1
+        # Variable c{n} is whether the nth circle is selected
+        circle_vars = [
+            model.add_var(name="c{n}", var_type=mip.BINARY) for n in range(len(circles))
+        ]
 
-            logger.info("{} points in circle centre ({}, {}) of radius {} degrees (TBDFM_max = {})"
-                        .format(len(contained_sources), x_new, y_new, beamform_rad, max(contained_score)))
+        # Add a constraint that we must select at most 64 circles
+        model += mip.xsum(circle_vars) <= 64
 
-            # for each circle, append its coordinates, contained points & number of contained
-            # points to total_circles list
-            total_circles.append([x_new, y_new, len(contained_sources),
-                                  contained_sources, contained_coords, max(contained_score)])
+        # For each target, if its variable is 1 then at least one of its circles must also be 1
+        circles_for_target = {}
+        for (circle_index, circle) in enumerate(circles):
+            for target in circle.targets:
+                if target.index not in circles_for_target:
+                    circles_for_target[target.index] = []
+                circles_for_target[target.index].append(circle_index)
+        for target_index, circle_indexes in circles_for_target.items():
+            cvars = [circle_vars[i] for i in circle_indexes]
+            model += mip.xsum(cvars) >= target_vars[target_index]
 
-        # create dataframe from total_circles list, sorted descending by number of points contained
-        circles_df = pd.DataFrame(sorted(total_circles, key=lambda x: x[5], reverse=True),
-                                  columns=['ra', 'decl', 'n_contained', 'contained_id', 'contained_radec', 'max_tbdfm'])
-        logger.info('\n\n{}\n'.format(circles_df))
+        # Maximize the total score for targets we observe
+        model.objective = mip.xsum(
+            t.score * tvar for (t, tvar) in zip(points_db, target_vars)
+        )
 
-        # initialise empty list to store coordinates & points contained by most densely populated circles
-        circles_containing = []
-        # while there are still targets to analyse,
-        while len(points_db) != 0:
-            try:
-                # if the top circle in the dataframe still contains unmarked points,
-                if len(circles_df['contained_id'][0]) != 0:
-                    logger.info("Number of points remaining: {}".format(len(points_db)))
-                    # covered = the first source_id stored
-                    covered_id = circles_df['contained_id'][0][0]
-                    covered_radec = circles_df['contained_radec'][0][0]
-                    n_circle_ra = [item[0] for item in circles_containing]
-                    n_circle_ra.append(circles_df['ra'][0])
-                    logger.info(len(set(n_circle_ra)))
-                    # append circles_containing with target and circle data from circles_df
-                    circles_containing.append([circles_df['ra'][0],
-                                               circles_df['decl'][0],
-                                               len(set(n_circle_ra)),
-                                               covered_id,
-                                               covered_radec,
-                                               circles_df['max_tbdfm'][0]])
-                    # prefiltering boundary conditions to speed up operations
-                    x_max = covered_radec[0] + beamform_rad
-                    x_min = covered_radec[0] - beamform_rad
-                    y_max = covered_radec[1] + beamform_rad
-                    y_min = covered_radec[1] - beamform_rad
-                    # prefilter
-                    filtered_circles = circles_df[(circles_df['ra'] < x_max) & (circles_df['ra'] > x_min)
-                                                  & (circles_df['decl'] < y_max) & (circles_df['decl'] > y_min)]\
-                        .reset_index(drop=True)
-                    # for each of the filtered circles,
-                    for q in range(0, len(filtered_circles.index)):
-                        # remove those circles from the circles_df dataframe
-                        circles_df = circles_df[(circles_df['ra'] != filtered_circles['ra'][q])
-                                                & (circles_df['decl'] != filtered_circles['decl'][q])]
-                        # if the covered coordinates are contained by any other circle,
-                        if covered_id in filtered_circles['contained_id'][q]:
-                            # remove them
-                            filtered_circles['contained_id'][q].remove(covered_id)
-                            filtered_circles['contained_radec'][q].remove(covered_radec)
-                            # update the number of contained points for each circle
-                            filtered_circles.loc[q, 'n_contained'] = len(filtered_circles['contained_id'][q])
-                    # concatenate circles_df with filtered_circles, the entries previously removed and amended
-                    circles_df = pd.concat([filtered_circles, circles_df]).reset_index(drop=True)
-                    # remove covered target from the points list
-                    points_db = [item for item in points_db if item.source_id != covered_id]
+        # Optimize
+        status = model.optimize(max_seconds=30)
+        if status == mip.OptimizationStatus.OPTIMAL:
+            logger.info("Optimal solution found")
+        elif status == mip.OptimizationStatus.FEASIBLE:
+            logger.info("Feasible solution found")
+        else:
+            logger.info("No solution found. This is probably a bug")
+            return
 
-                else:
-                    # remove circles with no remaining contained points from circles_df
-                    # sort dataframe descending by number of points contained
-                    circles_df = circles_df[circles_df['n_contained'] != 0]\
-                        .sort_values('max_tbdfm', ascending=False)\
-                        .reset_index(drop=True)
+        selected_circles = []
+        for circle, circle_var in zip(circles, circle_vars):
+            if circle_var.x > 1e-6:
+                selected_circles.append(circle)
 
-            except IndexError:
-                logger.info("Number of points remaining: {}".format(len(points_db)))
-                n_circles = circles_containing[-1][2] + 1
-                # covered_radec = (points_db[q].ra, points_db[q].decl)
-                circles_containing.append([points_db[0].ra,
-                                           points_db[0].decl,
-                                           n_circles,
-                                           points_db[0].source_id,
-                                           (points_db[0].ra, points_db[0].decl),
-                                           1 ** (1 / points_db[0].priority)])
-                points_db = [item for item in points_db if item.source_id != points_db[0].source_id]
+        selected_targets = []
+        for target, target_var in zip(points_db, target_vars):
+            if target_var.x > 1e-6:
+                selected_targets.append(target)
 
-            # elif len(circles_df['contained_id'][1]) != 0:
-            #     # remove circles with no remaining contained points from circles_df
-            #     # sort dataframe descending by number of points contained
-            #     circles_df = circles_df[circles_df['n_contained'] != 0]\
-            #         .sort_values('max_tbdfm', ascending=False)\
-            #         .reset_index(drop=True)
-            #
-            # else:
-            #     for i in range(0, len(points_db)):
-            #         logger.info(points_db[i].source_id)
+        logger.info("The solution observes {} targets".format(len(selected_targets)))
+        pcount = {}
+        for t in selected_targets:
+            pcount[t.priority] = pcount.get(t.priority, 0) + 1
+        for p, count in sorted(pcount.items()):
+            logger.info("{} of the targets have priority {}".format(count, p))
+        targets_to_observe = []
+        circles_to_observe = []
+        for circle in selected_circles:
+            target_str = ", ".join(t.source_id for t in circle.targets)
+            dist_str = ", ".join(str(t.dist_c) for t in circle.targets)
+            priority_str = ", ".join(str(t.priority) for t in circle.targets)
+            table_str = ", ".join(t.table_name for t in circle.targets)
+            circles_to_observe.append([circle.ra, circle.decl, target_str, priority_str, dist_str, table_str])
+            # logger.info("Circle ({}, {}) contains targets {}".format(circle.ra, circle.decl, target_str))
+            for t in circle.targets:
+                targets_to_observe.append([circle.ra, circle.decl, t.source_id, t.priority, t.dist_c, t.table_name])
 
-        # create dataframe of data from circles_containing
-        points_df = pd.DataFrame(circles_containing, columns=['circle_ra',
-                                                              'circle_dec',
-                                                              'n_circles',
-                                                              'source_id',
-                                                              'point_coord',
-                                                              'max_tbdfm'])
-        logger.info("\n\n{}\n".format(points_df))
-        logger.info("{} visible targets can be observed with a minimum of {} beams"
-                    .format(n_targets, points_df['n_circles'].max()))
-        beamform_64 = points_df[points_df['n_circles'] <= 64]
-        logger.info("{} targets can be observed with {} beams"
-                    .format(len(beamform_64.index), beamform_64['n_circles'].max()))
+        circle_columns = ['ra', 'decl', 'source_id', 'contained_priority', 'contained_dist_c', 'contained_table']
+        circles_dict = {k: [x[i] for x in circles_to_observe] for i, k in enumerate(circle_columns)}
+        write_pair_redis(self.redis_server, "{}:current_obs:beamform_beams"
+                         .format(product_id), json.dumps(circles_dict))
 
-        # POSSIBLY WHEN INCLUDING PRIORITY, ADD WEIGHTING TO CIRCLES
-        # MAKE SOME PLOTS TO VERIFY FUNCTIONALITY
+        target_columns = ['circle_ra', 'circle_decl', 'source_id', 'priority', 'dist_c', 'table_name']
+        targets_dict = {k: [x[i] for x in targets_to_observe] for i, k in enumerate(target_columns)}
+        write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets"
+                         .format(product_id), json.dumps(targets_dict))
 
     def intersect_two_circles(self, x0, y0, r0, x1, y1, r1):
         """
