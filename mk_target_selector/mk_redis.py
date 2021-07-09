@@ -222,11 +222,11 @@ class Listen(threading.Thread):
                     #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources"
                     #                                                              .format(mode))))
 
-                check_flag = False
-                if mode == "current_obs":
-                    check_flag = False
-                elif mode == "new_obs":
-                    check_flag = True
+                # check_flag = False
+                # if mode == "current_obs":
+                #     check_flag = False
+                # elif mode == "new_obs":
+                #     check_flag = True
 
                 targets = self\
                     .engine.select_targets(np.deg2rad(coords_ra),
@@ -234,8 +234,7 @@ class Listen(threading.Thread):
                                            current_freq=self._get_sensor_value(product_id, "{}:frequency".format(mode)),
                                            beam_rad=self._beam_radius(self._get_sensor_value(product_id,
                                                                                              "{}:frequency"
-                                                                                             .format(mode))),
-                                           check_flag=check_flag)
+                                                                                             .format(mode))))
 
                 columns = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
                 targ_dict = targets.loc[:, columns].to_dict('list')
@@ -292,8 +291,8 @@ class Listen(threading.Thread):
 
         for sensor in sensor_list:
             key_glob = ('{}:*:{}'.format(product_id, sensor))
-            success_key_glob = ('{}:success_source_id*'.format(product_id))
-            ackn_key_glob = ('{}:acknowledge_source_id*'.format(product_id))
+            success_key_glob = ('{}:success_*'.format(product_id))
+            ackn_key_glob = ('{}:acknowledge_*'.format(product_id))
             new_obs_key_glob = ("{}:new_obs:*".format(product_id))
             current_key_glob = ("{}:current_obs:*".format(product_id))
             for a in self.redis_server.scan_iter(key_glob):
@@ -540,11 +539,10 @@ class Listen(threading.Thread):
         Returns:
             None
         """
-        logger.info("Frequency message received: {}".format(message))
+        frequency_value = get_redis_key(self.redis_server, message)
+        logger.info("Frequency message received: {}, {}".format(message, frequency_value))
 
         product_id, sensor_name = message.split(':')
-        frequency_value = get_redis_key(self.redis_server, message)
-
         frequency_key = "{}:new_obs:frequency".format(product_id)
         write_pair_redis(self.redis_server, frequency_key, frequency_value)
         # logger.info("Wrote [{}] to [{}]".format(frequency_value, frequency_key))
@@ -560,34 +558,48 @@ class Listen(threading.Thread):
             None
         """
 
+        # message = "array_1:success_XX.XXXX_YY.YYYY"
         product_id = message.split(':')[0]
-        sensor_name = message.split(':')[-1]
-        source_id = sensor_name.split('source_id_')[1]
+        ra = "{:0.4f}".format(float(message.split("_")[2]))
+        decl = "{:0.4f}".format(float(message.split("_")[3]))
+        # beamform_radec = "circle_{:0.4f}_{:0.4f}".format(ra, decl)
 
         # update observation_status with success message
-        self.engine.update_obs_status(source_id,
-                                      obs_start_time=str(self.round_time
+        self.engine.update_obs_status(obs_start_time=str(self.round_time
                                                          (self._get_sensor_value
                                                           (product_id, "current_obs:obs_start_time"))),
+                                      beamform_ra=ra,
+                                      beamform_decl=decl,
+                                      # beamform_radec=beamform_radec,
                                       processed='TRUE')
 
-        target_list = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
         remaining_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
-
-        # FIND INDEX WHERE SOURCE_ID == SOURCE_ID
         remaining_all = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
-        if source_id in remaining_all['source_id']:
-            idx_to_rm_all = remaining_all['source_id'].index(source_id)
-            idx_to_rm_64 = remaining_64['source_id'].index(source_id)
-            # REMOVE INDEX FROM LISTS UNDER ALL KEYS
-            keys_all = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
-            for i in keys_all:
-                to_rm = remaining_all.get(i)
-                del to_rm[idx_to_rm_all]
-            keys_64 = ['circle_ra', 'circle_decl', 'source_id', 'dist_c', 'table_name', 'priority']
+
+        # REMOVE INDEX FROM LISTS UNDER ALL KEYS
+        # rounded_ra = [round(num, 4) for num in remaining_64['ra']]
+        # if ra in rounded_ra:
+        #     idx_ra = rounded_ra.index(ra)
+
+        remaining_str = ["{:0.4f}".format(item) for item in remaining_64['ra']]
+        if ra in remaining_str:
+            idx_ra = remaining_str.index(ra)
+            for m in remaining_64['source_id'][idx_ra].split(", "):
+                if m in remaining_all['source_id']:
+                    idx_to_rm_all = remaining_all['source_id'].index(m)
+                    keys_all = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
+                    for i in keys_all:
+                        to_rm = remaining_all.get(i)
+                        del to_rm[idx_to_rm_all]
+            keys_64 = ['ra', 'decl', 'source_id', 'contained_dist_c', 'contained_table', 'contained_priority']
             for j in keys_64:
                 to_rm = remaining_64.get(j)
-                del to_rm[idx_to_rm_64]
+                del to_rm[idx_ra]
+        else:
+            logger.info("Was not able to remove successfully processed target {}, {} "
+                        "from list of targets remaining to process".format(ra, decl))
+            logger.info("\n\n{}\n".format(remaining_str))
+
         write_pair_redis(
             self.redis_server,
             "{}:current_obs:remaining_to_process".format(product_id), json.dumps(remaining_all))
@@ -595,8 +607,8 @@ class Listen(threading.Thread):
             self.redis_server,
             "{}:current_obs:processing_64".format(product_id), json.dumps(remaining_64))
 
-        remaining_all = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
-        remaining_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
+        # remaining_all = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
+        # remaining_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
 
         if not len(remaining_all['source_id']):
             logger.info("Successful processing of all remaining beamforming targets confirmed by processing nodes")
@@ -606,8 +618,9 @@ class Listen(threading.Thread):
                 "-------------------------------------------------------------------------------------------------")
             logger.info("Processing state set to \'ready\'")
 
-        elif not len(remaining_64['source_id']):
-            logger.info("Successful processing of 64 beamforming targets confirmed by processing nodes")
+        elif not len(remaining_64['ra']):
+            logger.info("Successful processing of 64 beamforming targets confirmed by processing nodes. "
+                        "Calculating next 64")
             self._publish_targets(remaining_all, product_id)
             self.store_metadata(product_id, mode="next_64")
 
@@ -625,39 +638,20 @@ class Listen(threading.Thread):
         """
 
         product_id = message.split(':')[0]
-        source_id = message.split("acknowledge_source_id_")[1]
+        # message = "array_1:acknowledge_XX.XXXX_YY.YYYY"
+        ra = float(message.split("_")[2])
+        decl = float(message.split("_")[3])
 
-        # if message contains final target source_id,
-        remaining_all = pd.DataFrame.from_dict(
-            json.loads(self._get_sensor_value(product_id, "current_obs:unacknowledged_all")))
         remaining_64 = pd.DataFrame.from_dict(
             json.loads(self._get_sensor_value(product_id, "current_obs:unacknowledged_64")))
-
-        remaining_all = remaining_all[remaining_all["source_id"] != source_id]\
+        remaining_64 = remaining_64.loc[~((remaining_64['ra'] == ra) | (remaining_64['decl'] == decl))]\
             .reset_index(drop=True).to_dict(orient="list")
-        remaining_64 = remaining_64[remaining_64["source_id"] != source_id]\
-            .reset_index(drop=True).to_dict(orient="list")
-
-        write_pair_redis(self.redis_server, "{}:current_obs:unacknowledged_all".format(product_id),
-                         json.dumps(remaining_all))
         write_pair_redis(self.redis_server, "{}:current_obs:unacknowledged_64".format(product_id),
                          json.dumps(remaining_64))
 
-        if not remaining_all['source_id']:
-            # all sources have been received by the processing nodes
-            # begin processing time
-            logger.info("Receipt of all remaining targets confirmed by processing nodes")
-            # write_pair_redis(self.redis_server,
-            #                  "{}:current_obs:proc_start_time".format(product_id),
-            #                  str(datetime.now()))
-
-        elif not remaining_64['source_id']:
-            # 64 sources have been received by the processing nodes
-            # begin processing time
+        if not len(remaining_64['ra']):
+            # 64 target coordinates have been received by the processing nodes
             logger.info("Receipt of next 64 beamforming coordinates confirmed by processing nodes")
-            # write_pair_redis(self.redis_server,
-            #                  "{}:current_obs:proc_start_time".format(product_id),
-            #                  str(datetime.now()))
 
     """
 
@@ -925,7 +919,6 @@ class Listen(threading.Thread):
                         logger.info(e)
 
                 pool_resources = self._get_sensor_value(product_id, "current_obs:pool_resources")
-
                 antennas = ','.join(re.findall(r'm\d{3}', pool_resources))
                 proxies = ','.join(re.findall(r'[a-z A-Z]+_\d', pool_resources))
                 start = self._get_sensor_value(product_id, "current_obs:obs_start_time")
@@ -982,24 +975,28 @@ class Listen(threading.Thread):
             None
         """
 
-        key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
-        key_all_remaining = '{}:current_obs:remaining_to_process'.format(product_id)
-        key_64_remaining = '{}:current_obs:processing_64'.format(product_id)
-        key_all_unacknowledged = '{}:current_obs:unacknowledged_all'.format(product_id)
-        key_64_unacknowledged = '{}:current_obs:unacknowledged_64'.format(product_id)
-
+        # calculate list containing the maximum number of targets observable with 64 beams
         self.beam_number(product_id, targets)
+        # fetch list of beamforming coordinates
         beamform_beams = json.loads(self._get_sensor_value(product_id, "current_obs:beamform_beams"))
+        # fetch list of targets contained within beams centred on the above beamforming coordinates
         beamform_targets = json.loads(self._get_sensor_value(product_id, "current_obs:beamform_targets"))
+        # total number of beamforming coordinates
         init_coords = len(beamform_beams['ra'])
+        # total number of unique contained targets
         init_targets = len(beamform_targets['source_id'])
+        init_unique = len(set(beamform_targets['source_id']))
 
         n_spare = 64 - init_coords
+        # if all targets can be observed with fewer than 64 beams,
         if n_spare >= 1:
+            # fetch current observation coordinates
             coords = self._get_sensor_value(product_id, "current_obs:coords")
             c_ra = math.radians(float(coords.split(", ")[0]))
             c_dec = math.radians(float(coords.split(", ")[1]))
+            # calculate the beam radius from the current observation frequency
             beam_rad = self._beam_radius(self._get_sensor_value(product_id, "current_obs:frequency"))
+            # for each "spare" beam,
             for n in range(1, n_spare + 1):
                 # random angle
                 alpha = 2 * math.pi * random.random()
@@ -1011,42 +1008,53 @@ class Listen(threading.Thread):
                 if x > math.pi:
                     x = x - (2 * math.pi)
                 y = r * math.sin(alpha) + c_dec
-                source_id = "spare_{}_{}".format(math.degrees(x), math.degrees(y))
+                source_id = "spare_{:0.4f}_{:0.4f}".format(math.degrees(x), math.degrees(y))
+                # append values for spare beams to beams table
                 beamform_beams['source_id'].append(source_id)
-                beamform_beams['ra'].append(math.degrees(x))
-                beamform_beams['decl'].append(math.degrees(y))
+                beamform_beams['ra'].append(float("{:0.4f}".format(math.degrees(x))))
+                beamform_beams['decl'].append(float("{:0.4f}".format(math.degrees(y))))
                 beamform_beams['contained_dist_c'].append(0)
                 beamform_beams['contained_priority'].append(7)
                 beamform_beams['contained_table'].append('spare_beams')
-
+                # append values for spare beams to targets table
                 beamform_targets['source_id'].append(source_id)
-                beamform_targets['circle_ra'].append(math.degrees(x))
-                beamform_targets['circle_decl'].append(math.degrees(y))
+                beamform_targets['circle_ra'].append(float("{:0.4f}".format(math.degrees(x))))
+                beamform_targets['circle_decl'].append(float("{:0.4f}".format(math.degrees(y))))
                 beamform_targets['dist_c'].append(0)
                 beamform_targets['priority'].append(7)
                 beamform_targets['table_name'].append('spare_beams')
 
+        key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
+        key_all_remaining = '{}:current_obs:remaining_to_process'.format(product_id)
+        key_64_remaining = '{}:current_obs:processing_64'.format(product_id)
+        key_64_unacknowledged = '{}:current_obs:unacknowledged_64'.format(product_id)
         channel = "bluse:///set"
-
+        # write tables to redis
         write_pair_redis(self.redis_server, key, json.dumps(targets))
-        write_pair_redis(self.redis_server, key_64_remaining, json.dumps(beamform_targets))
-        write_pair_redis(self.redis_server, key_64_unacknowledged, json.dumps(beamform_targets))
-
+        write_pair_redis(self.redis_server, key_64_remaining, json.dumps(beamform_beams))
+        write_pair_redis(self.redis_server, key_64_unacknowledged, json.dumps(beamform_beams))
+        # rename columns in beamform_targets table
         beamform_targets['ra'] = beamform_targets.pop('circle_ra')
         beamform_targets['decl'] = beamform_targets.pop('circle_decl')
+
         if n_spare >= 1:
-            logger.info('{} beamforming coordinates containing {} of {} targets plus '
+            # if there are spare beams,
+            logger.info('{} beamforming coordinates containing {} of {} unique targets ({} total) plus '
                         '{} random coordinates for spare beams published to {}'
-                        .format(init_coords, init_targets, len(targets.get('source_id')), n_spare, channel))
+                        .format(init_coords,
+                                init_unique, len(targets.get('source_id')), init_targets, n_spare, channel))
+            # write tables to redis
             write_pair_redis(self.redis_server, key_all_remaining, json.dumps(beamform_targets))
-            write_pair_redis(self.redis_server, key_all_unacknowledged, json.dumps(beamform_targets))
             write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id),
                              json.dumps(beamform_targets))
         elif n_spare < 1:
-            logger.info('{} beamforming coordinates containing {} of {} targets published to {}'
-                        .format(init_coords, init_targets, len(targets.get('source_id')), channel))
+            # if there are no spare beams,
+            logger.info('{} beamforming coordinates containing {} of {} unique targets ({} total) published to {}'
+                        .format(init_coords,
+                                init_unique, len(targets.get('source_id')), init_targets, channel))
+            # write tables to redis
             write_pair_redis(self.redis_server, key_all_remaining, json.dumps(targets))
-            write_pair_redis(self.redis_server, key_all_unacknowledged, json.dumps(targets))
+
         publish(self.redis_server, channel, key)
 
     def pointing_coords(self, t_str):
@@ -1276,7 +1284,7 @@ class Listen(threading.Thread):
             if target_var.x > 1e-6:
                 selected_targets.append(target)
 
-        logger.info("The solution observes {} targets".format(len(selected_targets)))
+        logger.info("The solution observes {} unique targets".format(len(selected_targets)))
         pcount = {}
         for t in selected_targets:
             pcount[t.priority] = pcount.get(t.priority, 0) + 1

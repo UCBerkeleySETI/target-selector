@@ -42,7 +42,7 @@ class Observation(Base):
     """
     __tablename__ = 'observation_status'
     rowid = Column(INT, primary_key=True)
-    source_id = Column(BIGINT)
+    source_id = Column(VARCHAR(45))
     antennas = Column(Text)
     n_antennas = Column(INT)
     proxies = Column(Text)
@@ -52,6 +52,8 @@ class Observation(Base):
     mode = Column(INT)
     time = Column(TIMESTAMP)
     processed = Column(Text)
+    beamform_ra = Column(FLOAT)
+    beamform_decl = Column(FLOAT)
 
 
 def cli(prog=sys.argv[0]):
@@ -118,11 +120,11 @@ def main(user, password, host, schema_name):
     if not engine.dialect.has_table(engine, obs_table_name):
         print('Creating table: {}'.format(obs_table_name))
         Base.metadata.create_all(engine)
-        engine.execute('ALTER TABLE {}.{} MODIFY source_id VARCHAR(45);'.format(schema_name, "observation_status"))
+        # engine.execute('ALTER TABLE {}.{} MODIFY source_id VARCHAR(45);'.format(schema_name, "observation_status"))
     else:
         engine.execute('DROP TABLE {}.{}'.format(schema_name, obs_table_name))
         Base.metadata.create_all(engine)
-        engine.execute('ALTER TABLE {}.{} MODIFY source_id VARCHAR(45);'.format(schema_name, "observation_status"))
+        # engine.execute('ALTER TABLE {}.{} MODIFY source_id VARCHAR(45);'.format(schema_name, "observation_status"))
 
     # Create adhoc sources table
     if not engine.dialect.has_table(engine, adhoc_table_name):

@@ -150,7 +150,29 @@ class Triage(DatabaseHandler):
                 Else, returns False.
         """
 
-        source_tb = df.loc[:, ['source_id']]
+        source_ids = []
+        beamform_ra = []
+        beamform_decl = []
+
+        for n in df.index:
+            indiv_ids = df['source_id'][n].split(", ")
+            for item in indiv_ids:
+                # beamform_radec.append("circle_{:0.4f}_{:0.4f}".format(df['ra'][n], df['decl'][n]))
+                beamform_ra.append("{:0.4f}".format(df['ra'][n]))
+                beamform_decl.append("{:0.4f}".format(df['decl'][n]))
+                source_ids.append(item)
+
+        source_tb = pd.DataFrame(
+            {'source_id': source_ids,
+             'beamform_ra': beamform_ra,
+             'beamform_decl': beamform_decl
+             })
+
+        # source_tb = pd.DataFrame(
+        #     {'source_id': source_ids,
+        #      'beamform_radec': beamform_radec
+        #      })
+
         source_tb['duration'] = (datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S.%f")
                                  - datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
         source_tb['time'] = start_time
@@ -170,8 +192,7 @@ class Triage(DatabaseHandler):
             logger.warning('Was not able to add sources to the database!')
             return False
 
-    def update_obs_status(self, source_id, obs_start_time,
-                          processed, table='observation_status'):
+    def update_obs_status(self, obs_start_time, processed, beamform_ra, beamform_decl, table='observation_status'):
         """
         Function to update the status of the observation. For now, it only updates
         the success column, but should be flexible enough to update things like
@@ -184,6 +205,10 @@ class Triage(DatabaseHandler):
                 Start time of observation
             processed: (bool)
                 Status of the observation that is to be updated
+            beamform_ra: (float)
+                RA coordinate of the formed beam
+            beamform_decl: (float)
+                Decl coordinate of the formed beam
             table: (str)
                 Name of the table to be updated with processing success
 
@@ -199,13 +224,16 @@ class Triage(DatabaseHandler):
         update = """\
                     UPDATE {table}
                     SET processed = {processed}
-                    WHERE (source_id = '{id}' AND time = '{time}');
-                 """.format(table=table, id=source_id,
+                    WHERE (beamform_ra = '{beamform_ra}' AND beamform_decl = '{beamform_decl}' AND time = '{time}');
+                 """.format(table=table,
+                            beamform_ra=beamform_ra,
+                            beamform_decl=beamform_decl,
                             time=parser.parse(obs_start_time),
                             processed=processed)
+
         self.conn.execute(update)
 
-    def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq, check_flag=False):
+    def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq):
         """Returns a string which acts as a pre-filter for the more computationally
         intensive search
 
@@ -223,9 +251,6 @@ class Triage(DatabaseHandler):
                 Columns to select within the table
             current_freq: (str)
                 Current central frequency of observation in Hz
-            check_flag: (bool)
-                Denotes whether the target selector is selecting targets to publish, or to check against existing target
-                list. Value is TRUE in the second case, and the beam radius calculation
         Returns:
             query: (str)
                 SQL query string
@@ -234,9 +259,8 @@ class Triage(DatabaseHandler):
         current_band = self._freqBand(current_freq)
         beam_rad_arcmin = beam_rad * (180 / math.pi) * 60
 
-        if not check_flag:
-            logger.info("Beam radius at {} ({}): {} radians = {} arc minutes"
-                        .format(self.freq_format(current_freq), current_band, beam_rad, beam_rad_arcmin))
+        logger.info("Beam radius at {} ({}): {} radians = {} arc minutes"
+                    .format(self.freq_format(current_freq), current_band, beam_rad, beam_rad_arcmin))
 
         if c_dec - beam_rad <= - np.pi / 2.0:
             ra_min, ra_max = 0.0, 2.0 * np.pi
@@ -374,7 +398,7 @@ class Triage(DatabaseHandler):
         return tb.sort_values('priority')
 
     def select_targets(self, c_ra, c_dec, beam_rad, current_freq='Unknown', table='target_list',
-                       cols=None, check_flag=False):
+                       cols=None):
         """Returns a string to query the 1 million star database to find sources
            within some primary beam area
 
@@ -391,9 +415,6 @@ class Triage(DatabaseHandler):
                 Name of the MySQL table that is being queried
             cols: (list)
                 Columns of table to output
-            check_flag: (bool)
-                Denotes whether the target selector is selecting targets to publish, or to check against existing target
-                list. Value is TRUE in the second case, and the SQL query is not logged
 
         Returns:
             target_list: (DataFrame)
@@ -405,7 +426,7 @@ class Triage(DatabaseHandler):
         if not cols:
             cols = ['ra', 'decl', 'source_id', 'dist_c', 'table_name']
 
-        mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols, current_freq, check_flag)
+        mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols, current_freq)
 
         query = """
                 SELECT *

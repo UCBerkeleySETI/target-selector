@@ -129,14 +129,18 @@ with open('random_seed.csv') as f:
                         # df = pd.read_csv(data, header=None, index_col=0, float_precision='round_trip')
                         # targetsFinal = df.transpose()
                         # print("\n",targetsFinal)
-                        for s in data['source_id']:
-                            publish_key('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
-                            print('sensor_alerts', '{}:acknowledge_source_id_{}'.format(product_id, s), "True")
+                        for s in data.index:
+                            publish_key('sensor_alerts', '{}:acknowledge_{:0.4f}_{:0.4f}'
+                                        .format(product_id, data['ra'][s], data['decl'][s]), "True")
+                            print('sensor_alerts', '{}:acknowledge_{:0.4f}_{:0.4f}'
+                                  .format(product_id, data['ra'][s], data['decl'][s]), "True")
                             time.sleep(0.05)
                         time.sleep(0.05)
-                        for s in data['source_id']:
-                            publish_key('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
-                            print('sensor_alerts', '{}:success_source_id_{}'.format(product_id, s), "True")
+                        for s in data.index:
+                            publish_key('sensor_alerts', '{}:success_{:0.4f}_{:0.4f}'
+                                        .format(product_id, data['ra'][s], data['decl'][s]), "True")
+                            print('sensor_alerts', '{}:success_{:0.4f}_{:0.4f}'
+                                  .format(product_id, data['ra'][s], data['decl'][s]), "True")
                             time.sleep(0.05)
                         time.sleep(0.05)
                 except TypeError:  # array_1:pointing_0:targets empty (NoneType)
