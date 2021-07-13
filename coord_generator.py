@@ -105,8 +105,8 @@ with open('random_seed.csv') as f:
                 if final_messages[i+4].endswith('True'):
                     print(chnls[i], final_messages[i])
                     r.publish(chnls[i], final_messages[i])
-                    print("Observing for 20 seconds...")
-                    time.sleep(20)
+                    print("Observing for 1 minute...")
+                    time.sleep(60)
                 # try:
                 #     key_glob_remaining = '*:*:remaining_to_process'
                 #     for j in r.scan_iter(key_glob_remaining):
@@ -131,16 +131,16 @@ with open('random_seed.csv') as f:
                         # print("\n",targetsFinal)
                         for s in data.index:
                             publish_key('sensor_alerts', '{}:acknowledge_{:0.4f}_{:0.4f}'
-                                        .format(product_id, data['ra'][s], data['decl'][s]), "True")
+                                        .format(product_id, float(data['ra'][s]), float(data['decl'][s])), "True")
                             print('sensor_alerts', '{}:acknowledge_{:0.4f}_{:0.4f}'
-                                  .format(product_id, data['ra'][s], data['decl'][s]), "True")
+                                  .format(product_id, float(data['ra'][s]), float(data['decl'][s])), "True")
                             time.sleep(0.05)
                         time.sleep(0.05)
                         for s in data.index:
                             publish_key('sensor_alerts', '{}:success_{:0.4f}_{:0.4f}'
-                                        .format(product_id, data['ra'][s], data['decl'][s]), "True")
+                                        .format(product_id, float(data['ra'][s]), float(data['decl'][s])), "True")
                             print('sensor_alerts', '{}:success_{:0.4f}_{:0.4f}'
-                                  .format(product_id, data['ra'][s], data['decl'][s]), "True")
+                                  .format(product_id, float(data['ra'][s]), float(data['decl'][s])), "True")
                             time.sleep(0.05)
                         time.sleep(0.05)
                 except TypeError:  # array_1:pointing_0:targets empty (NoneType)

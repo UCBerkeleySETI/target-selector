@@ -581,7 +581,7 @@ class Listen(threading.Thread):
         # if ra in rounded_ra:
         #     idx_ra = rounded_ra.index(ra)
 
-        remaining_str = ["{:0.4f}".format(item) for item in remaining_64['ra']]
+        remaining_str = ["{:0.4f}".format(float(item)) for item in remaining_64['ra']]
         if ra in remaining_str:
             idx_ra = remaining_str.index(ra)
             for m in remaining_64['source_id'][idx_ra].split(", "):
@@ -598,7 +598,6 @@ class Listen(threading.Thread):
         else:
             logger.info("Was not able to remove successfully processed target {}, {} "
                         "from list of targets remaining to process".format(ra, decl))
-            logger.info("\n\n{}\n".format(remaining_str))
 
         write_pair_redis(
             self.redis_server,
@@ -606,9 +605,6 @@ class Listen(threading.Thread):
         write_pair_redis(
             self.redis_server,
             "{}:current_obs:processing_64".format(product_id), json.dumps(remaining_64))
-
-        # remaining_all = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
-        # remaining_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
 
         if not len(remaining_all['source_id']):
             logger.info("Successful processing of all remaining beamforming targets confirmed by processing nodes")
@@ -639,8 +635,8 @@ class Listen(threading.Thread):
 
         product_id = message.split(':')[0]
         # message = "array_1:acknowledge_XX.XXXX_YY.YYYY"
-        ra = float(message.split("_")[2])
-        decl = float(message.split("_")[3])
+        ra = message.split("_")[2]
+        decl = message.split("_")[3]
 
         remaining_64 = pd.DataFrame.from_dict(
             json.loads(self._get_sensor_value(product_id, "current_obs:unacknowledged_64")))
@@ -977,8 +973,14 @@ class Listen(threading.Thread):
 
         # calculate list containing the maximum number of targets observable with 64 beams
         self.beam_number(product_id, targets)
+
         # fetch list of beamforming coordinates
         beamform_beams = json.loads(self._get_sensor_value(product_id, "current_obs:beamform_beams"))
+        str_ra = [str(i) for i in beamform_beams['ra']]
+        str_decl = [str(i) for i in beamform_beams['decl']]
+        beamform_beams['ra'] = str_ra
+        beamform_beams['decl'] = str_decl
+
         # fetch list of targets contained within beams centred on the above beamforming coordinates
         beamform_targets = json.loads(self._get_sensor_value(product_id, "current_obs:beamform_targets"))
         # total number of beamforming coordinates
@@ -1011,15 +1013,19 @@ class Listen(threading.Thread):
                 source_id = "spare_{:0.4f}_{:0.4f}".format(math.degrees(x), math.degrees(y))
                 # append values for spare beams to beams table
                 beamform_beams['source_id'].append(source_id)
-                beamform_beams['ra'].append(float("{:0.4f}".format(math.degrees(x))))
-                beamform_beams['decl'].append(float("{:0.4f}".format(math.degrees(y))))
+                # beamform_beams['ra'].append(float("{:0.4f}".format(math.degrees(x))))
+                # beamform_beams['decl'].append(float("{:0.4f}".format(math.degrees(y))))
+                beamform_beams['ra'].append("{:0.4f}".format(float(math.degrees(x))))
+                beamform_beams['decl'].append("{:0.4f}".format(float(math.degrees(y))))
                 beamform_beams['contained_dist_c'].append(0)
                 beamform_beams['contained_priority'].append(7)
                 beamform_beams['contained_table'].append('spare_beams')
                 # append values for spare beams to targets table
                 beamform_targets['source_id'].append(source_id)
-                beamform_targets['circle_ra'].append(float("{:0.4f}".format(math.degrees(x))))
-                beamform_targets['circle_decl'].append(float("{:0.4f}".format(math.degrees(y))))
+                # beamform_targets['ra'].append(float("{:0.4f}".format(math.degrees(x))))
+                # beamform_targets['decl'].append(float("{:0.4f}".format(math.degrees(y))))
+                beamform_targets['circle_ra'].append(math.degrees(x))
+                beamform_targets['circle_decl'].append(math.degrees(y))
                 beamform_targets['dist_c'].append(0)
                 beamform_targets['priority'].append(7)
                 beamform_targets['table_name'].append('spare_beams')

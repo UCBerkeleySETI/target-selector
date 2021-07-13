@@ -158,8 +158,8 @@ class Triage(DatabaseHandler):
             indiv_ids = df['source_id'][n].split(", ")
             for item in indiv_ids:
                 # beamform_radec.append("circle_{:0.4f}_{:0.4f}".format(df['ra'][n], df['decl'][n]))
-                beamform_ra.append("{:0.4f}".format(df['ra'][n]))
-                beamform_decl.append("{:0.4f}".format(df['decl'][n]))
+                beamform_ra.append("{:0.4f}".format(float(df['ra'][n])))
+                beamform_decl.append("{:0.4f}".format(float(df['decl'][n])))
                 source_ids.append(item)
 
         source_tb = pd.DataFrame(
