@@ -256,6 +256,7 @@ class Triage(DatabaseHandler):
                 SQL query string
 
         """
+
         current_band = self._freqBand(current_freq)
         beam_rad_arcmin = beam_rad * (180 / math.pi) * 60
 
@@ -281,6 +282,15 @@ class Triage(DatabaseHandler):
 
         bounds = np.rad2deg([ra_min, ra_max, dec_min, dec_max])
 
+        if bounds[1] >= 360:
+            ra_360 = bounds[1] - 360
+            ra_str = "(({} < ra AND ra < 360) OR (0 < ra AND ra < {}))".format(bounds[0], ra_360)
+        elif bounds[0] <= 0:
+            ra_360 = bounds[0] + 360
+            ra_str = "((0 < ra AND ra < {}) OR ({} < ra AND ra < 360))".format(bounds[1], ra_360)
+        else:
+            ra_str = "({} < ra  AND ra < {})".format(bounds[0], bounds[1])
+
         query = """
                 SELECT {cols}
                 FROM exotica_list
@@ -290,11 +300,10 @@ class Triage(DatabaseHandler):
                 UNION ALL
                 SELECT {cols}
                 FROM {table}
-                WHERE ({ra_min} < ra  AND ra < {ra_max}) AND
+                WHERE {ra_str} AND
                       ({dec_min} < decl AND decl < {dec_max})
                 """.format(cols=', '.join(cols), table=table,
-                           ra_min=bounds[0], ra_max=bounds[1],
-                           dec_min=bounds[2], dec_max=bounds[3])
+                           ra_str=ra_str, dec_min=bounds[2], dec_max=bounds[3])
         return query
 
     def _freqBand(self, current_freq):
@@ -447,6 +456,7 @@ class Triage(DatabaseHandler):
         sorting_priority = self.triage(tb, current_freq)
         target_list = sorting_priority.sort_values(by=['priority', 'dist_c']).reset_index()
         # self.output_targets(target_list, c_ra, c_dec, current_freq)
+        target_list.to_csv("target_list_csv.csv")
         return target_list
 
     # def output_targets(self, target_list, c_ra, c_dec, current_freq='Unknown'):
