@@ -1136,6 +1136,7 @@ class Listen(threading.Thread):
         """
         # observation frequency and beamform radius
         obs_freq = self._get_sensor_value(product_id, "current_obs:frequency")
+        beam_rad = 0.5 * ((2.998e8 / float(obs_freq)) / 13.5) * 180 / math.pi
         beamform_rad = 0.5 * ((2.998e8 / float(obs_freq)) / 1000) * 180 / math.pi
 
         class Circle(object):
