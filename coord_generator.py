@@ -105,8 +105,8 @@ with open('random_seed.csv') as f:
                 if final_messages[i+4].endswith('True'):
                     print(chnls[i], final_messages[i])
                     r.publish(chnls[i], final_messages[i])
-                    print("Observing for 1 minute...")
-                    time.sleep(60)
+                    print("Observing for 30 seconds...")
+                    time.sleep(30)
                 # try:
                 #     key_glob_remaining = '*:*:remaining_to_process'
                 #     for j in r.scan_iter(key_glob_remaining):

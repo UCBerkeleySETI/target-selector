@@ -639,7 +639,13 @@ class Listen(threading.Thread):
         decl = message.split("_")[3]
 
         remaining_64 = pd.DataFrame.from_dict(
-            json.loads(self._get_sensor_value(product_id, "current_obs:unacknowledged_64")))
+            json.loads(self._get_sensor_value(product_id, "current_obs:unacknowledged_64")))\
+            .astype({'ra': float, 'decl': float})
+
+        format_mapping = {'ra': '{:0.4f}', 'decl': '{:0.4f}'}
+        for key, value in format_mapping.items():
+            remaining_64[key] = remaining_64[key].apply(value.format)
+
         remaining_64 = remaining_64.loc[~((remaining_64['ra'] == ra) | (remaining_64['decl'] == decl))]\
             .reset_index(drop=True).to_dict(orient="list")
         write_pair_redis(self.redis_server, "{}:current_obs:unacknowledged_64".format(product_id),
@@ -762,12 +768,13 @@ class Listen(threading.Thread):
         """
         arr_ra_dec = coords.split(', ')
         dec_coord = arr_ra_dec[1]
+        formatted_freq = self.engine.freq_format(frequency)
         if float(dec_coord) > 45:  # coordinates out of MeerKAT's range
             logger.info('Selected coordinates ({}) unavailable. Waiting for new coordinates'
                         .format(coords))
         else:  # no sources from target list in beam
-            logger.info('No targets visible for coordinates ({}) at {} Hz. Waiting for new coordinates'
-                        .format(coords, frequency))
+            logger.info('No targets visible for coordinates ({}) at {}. Waiting for new coordinates'
+                        .format(coords, formatted_freq))
 
         # DELETE mode:target_list redis key
         target_key = ('{}:{}:target_list'.format(product_id, mode))
