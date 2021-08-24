@@ -184,7 +184,6 @@ for p in range(0, len(uvSamples)):
     V = imagesCoord[0] * uvSamples[p][1]
     weight = WeightingList[p]
     fringeSum += weight*np.exp(1j*2*con.pi*(U + V)/gridNum)
-   
 
 fringeSum = fringeSum.reshape(imsize, imsize)/len(uvSamples)
 fringeSum = np.abs(fringeSum)
@@ -193,45 +192,19 @@ image = np.fft.fftshift(fringeSum)
 image = np.fliplr(image)
 image /= np.amax(image)
 
-im = ax1.imshow(image, cmap='inferno', aspect="equal")
-ax1.xaxis.set_ticklabels([])
-ax1.yaxis.set_ticklabels([])
-ax1.set_title('Synthesised Beam', fontdict=dict(fontsize=16))
-
 contours = measure.find_contours(image, 0.5)
+contour_curve = []
+curve_ra = []
+curve_dec = []
 with open("contour_vertices.csv", "w", newline="") as f:
     for contour in contours:
-        ax1.plot(contour[:, 1], contour[:, 0])
         for n in range(0, len(contour)):
             # convert from pixels to coordinates; 1 pixel = 1 arc second
             contour_ra_deg = ((contour[n][1] - 250) / 3600) + ra_deg
             contour_dec_deg = ((contour[n][0] - 250) / 3600) + dec_deg
             contour_deg = [(contour_ra_deg, contour_dec_deg)]
+            contour_curve.append(contour_deg)
+            curve_ra.append(contour_ra_deg)
+            curve_dec.append(contour_dec_deg)
             writer = csv.writer(f)
             writer.writerows(contour_deg)
-
-fig.colorbar(im, ax=ax1)
-scalebar = AnchoredSizeBar(ax1.transData,
-                           60, '1 arcmin', 'lower left',
-                           pad=0.1,
-                           color='white',
-                           frameon=False,
-                           size_vertical=1)
-
-ax1.add_artist(scalebar)
-
-plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=.04, hspace=.2)
-plt.savefig('SynthesisedBeam_{}.png'.format(current_coords), dpi=300)
-
-contour_curve = []
-curve_ra = []
-curve_dec = []
-for contour in contours:
-    for n in range(0, len(contour)):
-        # convert from pixels to coordinates; 1 pixel = 1 arc second
-        contour_ra_deg = ((contour[n][1] - 250) / 3600) + ra_deg
-        contour_dec_deg = ((contour[n][0] - 250) / 3600) + dec_deg
-        contour_deg = [(contour_ra_deg, contour_dec_deg)]
-        contour_curve.append(contour_deg)
-        curve_ra.append(contour_ra_deg)
-        curve_dec.append(contour_dec_deg)
