@@ -3,9 +3,7 @@ import numpy as np
 import csv
 import re
 import scipy.constants as con
-import matplotlib.pyplot as plt
 import datetime
-from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 from skimage import measure
 from mk_target_selector.redis_tools import (get_redis_key,
                                             connect_to_redis)
@@ -52,23 +50,17 @@ ants = np.genfromtxt('antenna.csv',
 
 # ENU = East North Up? ASDF
 ENUoffsets = []
+# create table with ENU offsets for each antenna
+for a in antlist:
+    ENUoffsets.append(np.array([float(ants["ENU"][a].split(' ')[2]),
+                                float(ants["ENU"][a].split(' ')[3]),
+                                float(ants["ENU"][a].split(' ')[4])]))
 
 '''
 Get gains for baseline weights
 '''
 weights = np.zeros(64,)
 weights[:] = 1.  # equal weight for all antennas
-
-'''
-Antenna plot 
-'''
-fig, ax1 = plt.subplots(1, 1, figsize=(10, 8))
-
-# create table with ENU offsets for each antenna
-for a in antlist:
-    ENUoffsets.append(np.array([float(ants["ENU"][a].split(' ')[2]),
-                                float(ants["ENU"][a].split(' ')[3]),
-                                float(ants["ENU"][a].split(' ')[4])]))
 
 '''
 Create baselines
