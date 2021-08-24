@@ -7,6 +7,7 @@ import math
 import random
 import mip
 import smallestenclosingcircle
+import scipy.constants as con
 import pandas as pd
 import numpy as np
 from io import StringIO
@@ -221,12 +222,6 @@ class Listen(threading.Thread):
                     # logger.info("Fetched [{}:{}:pool_resources]: [{}]"
                     #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources"
                     #                                                              .format(mode))))
-
-                # check_flag = False
-                # if mode == "current_obs":
-                #     check_flag = False
-                # elif mode == "new_obs":
-                #     check_flag = True
 
                 targets = self\
                     .engine.select_targets(np.deg2rad(coords_ra),
@@ -665,7 +660,7 @@ class Listen(threading.Thread):
         """Function to calculate and append TBDFM values to tables containing targets for both the new pointing and
         those currently remaining to process
 
-        TBDFM = To Be Determined Figure of Merit; = (N_sources)^(1/priority)
+        TBDFM = To Be Determined Figure of Merit
 
         Parameters:
             table: (dataframe)
@@ -676,8 +671,6 @@ class Listen(threading.Thread):
         """
         # create empty array for TBDFM parameter values in the target list
         tbdfm_param = np.full(table.shape[0], 0, dtype=float)
-        # fill this array with the (N_sources/priority) value for each row
-        # table = table.sort_values('dist_c', ignore_index=True)
 
         for q in table.index:
             tbdfm_param[q] = int(10 ** (7 - table['priority'][q]))
@@ -938,7 +931,8 @@ class Listen(threading.Thread):
                 targets = pd.DataFrame.from_dict(
                     json.loads(self._get_sensor_value(product_id, "current_obs:processing_64")))
 
-                self.engine.add_sources_to_db(targets, start, end, proxies, antennas, n_antennas, file_id, bands)
+                coords = self._get_sensor_value(product_id, "current_obs:coords")
+                self.engine.add_sources_to_db(targets, coords, start, end, proxies, antennas, n_antennas, file_id, bands)
 
     def _beam_radius(self, current_freq, dish_size=13.5):
         """Returns the beam radius based on the frequency band used in the
@@ -953,7 +947,7 @@ class Listen(threading.Thread):
         """
 
         # TODO: change this to the real name
-        beam_rad = 0.5 * (2.998e8 / float(current_freq)) / dish_size
+        beam_rad = 0.5 * (con.c / float(current_freq)) / dish_size
         return beam_rad
 
     def _publish_targets(self, targets, product_id, columns=None,
@@ -1029,8 +1023,8 @@ class Listen(threading.Thread):
                 beamform_beams['contained_table'].append('spare_beams')
                 # append values for spare beams to targets table
                 beamform_targets['source_id'].append(source_id)
-                # beamform_targets['ra'].append(float("{:0.4f}".format(math.degrees(x))))
-                # beamform_targets['decl'].append(float("{:0.4f}".format(math.degrees(y))))
+                beamform_targets['ra'].append(math.degrees(x))
+                beamform_targets['decl'].append(math.degrees(y))
                 beamform_targets['circle_ra'].append(math.degrees(x))
                 beamform_targets['circle_decl'].append(math.degrees(y))
                 beamform_targets['dist_c'].append(0)
@@ -1046,9 +1040,11 @@ class Listen(threading.Thread):
         write_pair_redis(self.redis_server, key, json.dumps(targets))
         write_pair_redis(self.redis_server, key_64_remaining, json.dumps(beamform_beams))
         write_pair_redis(self.redis_server, key_64_unacknowledged, json.dumps(beamform_beams))
-        # rename columns in beamform_targets table
-        beamform_targets['ra'] = beamform_targets.pop('circle_ra')
-        beamform_targets['decl'] = beamform_targets.pop('circle_decl')
+        # # rename columns in beamform_targets table
+        # beamform_targets['ra'] = beamform_targets.pop('circle_ra')
+        # beamform_targets['decl'] = beamform_targets.pop('circle_decl')
+
+        pd.DataFrame.to_csv(pd.DataFrame.from_dict(targets), "targets.csv")
 
         if n_spare >= 1:
             # if there are spare beams,
@@ -1143,8 +1139,8 @@ class Listen(threading.Thread):
         """
         # observation frequency and beamform radius
         obs_freq = self._get_sensor_value(product_id, "current_obs:frequency")
-        beam_rad = 0.5 * ((2.998e8 / float(obs_freq)) / 13.5) * 180 / math.pi
-        beamform_rad = 0.5 * ((2.998e8 / float(obs_freq)) / 1000) * 180 / math.pi
+        beam_rad = 0.5 * ((con.c / float(obs_freq)) / 13.5) * 180 / math.pi
+        beamform_rad = 0.5 * ((con.c / float(obs_freq)) / 1000) * 180 / math.pi
 
         class Circle(object):
             """
@@ -1314,15 +1310,20 @@ class Listen(threading.Thread):
             circles_to_observe.append([circle.ra, circle.decl, target_str, priority_str, dist_str, table_str])
             # logger.info("Circle ({}, {}) contains targets {}".format(circle.ra, circle.decl, target_str))
             for t in circle.targets:
-                targets_to_observe.append([circle.ra, circle.decl, t.source_id, t.priority, t.dist_c, t.table_name])
+                targets_to_observe.append([t.ra, t.decl,
+                                           circle.ra, circle.decl,
+                                           t.source_id, t.priority,
+                                           t.dist_c, t.table_name])
 
         circle_columns = ['ra', 'decl', 'source_id', 'contained_priority', 'contained_dist_c', 'contained_table']
         circles_dict = {k: [x[i] for x in circles_to_observe] for i, k in enumerate(circle_columns)}
+        pd.DataFrame.to_csv(pd.DataFrame.from_dict(circles_dict), "beamform_beams.csv")
         write_pair_redis(self.redis_server, "{}:current_obs:beamform_beams"
                          .format(product_id), json.dumps(circles_dict))
 
-        target_columns = ['circle_ra', 'circle_decl', 'source_id', 'priority', 'dist_c', 'table_name']
+        target_columns = ['ra', 'decl', 'circle_ra', 'circle_decl', 'source_id', 'priority', 'dist_c', 'table_name']
         targets_dict = {k: [x[i] for x in targets_to_observe] for i, k in enumerate(target_columns)}
+        pd.DataFrame.to_csv(pd.DataFrame.from_dict(targets_dict), "beamform_targets.csv")
         write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets"
                          .format(product_id), json.dumps(targets_dict))
 

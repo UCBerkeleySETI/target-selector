@@ -12,9 +12,11 @@ requires = [
     "python_dateutil>=2.8.0",
     "PyYAML>=5.1.2",
     "mysqlclient>=1.4.4",
-    "logger>=1.4"
-#    "matplotlib==2.2.5"
-    "scipy>=1.4.1"
+    "logger>=1.4",
+    "mip>=1.13.0",
+#    "matplotlib==2.2.5",
+    "scipy>=1.4.1",
+    "scikit-image>=0.15.0"
 ]
 
 setuptools.setup(

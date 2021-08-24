@@ -54,6 +54,8 @@ class Observation(Base):
     processed = Column(Text)
     beamform_ra = Column(FLOAT)
     beamform_decl = Column(FLOAT)
+    primary_ra = Column(FLOAT)
+    primary_decl = Column(FLOAT)
 
 
 def cli(prog=sys.argv[0]):

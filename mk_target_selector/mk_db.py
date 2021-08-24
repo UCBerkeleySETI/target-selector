@@ -116,7 +116,7 @@ class Triage(DatabaseHandler):
     def __init__(self, config_file):
         super(Triage, self).__init__(config_file)
 
-    def add_sources_to_db(self, df, start_time, end_time, proxies, antennas, n_antennas,
+    def add_sources_to_db(self, df, coords, start_time, end_time, proxies, antennas, n_antennas,
                           file_id, bands, mode=0, table='observation_status'):
         """
         Adds a pandas DataFrame to a specified table
@@ -125,6 +125,8 @@ class Triage(DatabaseHandler):
             df: (pandas.DataFrame)
                 DataFrame containing information on the sources within the field
                 of views
+            coords: (str)
+                Boresight coordinates for the primary beam
             start_time: (datetime)
                 Datetime start time object of the observation
             end_time: (datetime)
@@ -153,25 +155,29 @@ class Triage(DatabaseHandler):
         source_ids = []
         beamform_ra = []
         beamform_decl = []
+        primary_ra = []
+        primary_decl = []
+
+        c_ra = float(coords.split(", ")[0])
+        c_dec = float(coords.split(", ")[1])
 
         for n in df.index:
             indiv_ids = df['source_id'][n].split(", ")
             for item in indiv_ids:
-                # beamform_radec.append("circle_{:0.4f}_{:0.4f}".format(df['ra'][n], df['decl'][n]))
                 beamform_ra.append("{:0.4f}".format(float(df['ra'][n])))
                 beamform_decl.append("{:0.4f}".format(float(df['decl'][n])))
+                primary_ra.append("{:0.4f}".format(c_ra))
+                primary_decl.append("{:0.4f}".format(c_dec))
                 source_ids.append(item)
 
         source_tb = pd.DataFrame(
-            {'source_id': source_ids,
-             'beamform_ra': beamform_ra,
-             'beamform_decl': beamform_decl
+            {
+                'source_id': source_ids,
+                'beamform_ra': beamform_ra,
+                'beamform_decl': beamform_decl,
+                'primary_ra': primary_ra,
+                'primary_decl': primary_decl
              })
-
-        # source_tb = pd.DataFrame(
-        #     {'source_id': source_ids,
-        #      'beamform_radec': beamform_radec
-        #      })
 
         source_tb['duration'] = (datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S.%f")
                                  - datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
@@ -233,81 +239,7 @@ class Triage(DatabaseHandler):
 
         self.conn.execute(update)
 
-    def get_beam_dimensions(self, decl, beam_radius, hour_angle=0.0):
-
-        """
-        Determines the height and width of the MeerKAT primary
-        beam at a specific declination
-
-        Args:
-
-        decl (float): the declination of the phase centre of the
-                     MeerKAT pointing in decimal degrees.
-        beam_radius (float): the radius of the beam in decimal
-                             degrees if the telescope
-                             was pointing directly up. i.e. the radius
-                             of the beam if the beam were circular.
-        *kwargs:
-        hour_angle (float): the hour angle in decimal degrees. In the
-                            case of the incoherent beam this value is
-                            not important. Default: 0.0
-
-        Returns:
-            np.abs(beamwidth): (float)
-                Width of the beam in degrees
-        """
-
-        # Don't forget deg2rad and rad2deg!!!
-
-        latitude = np.deg2rad(-30.721)  # latitude of MeerKAT
-        straight_up = np.where(np.deg2rad(decl) == latitude)[0]
-
-        # For a nice explanation of these equations
-        # see: http://www.stargazing.net/kepler/altaz.html
-        sin_boresight_alt = ((np.sin(np.deg2rad(decl)) *
-                              np.sin(latitude)) +
-                             (np.cos(np.deg2rad(decl)) *
-                              np.cos(latitude) *
-                              np.cos(np.deg2rad(hour_angle))))
-        boresight_alt = np.arcsin(sin_boresight_alt)
-
-        cos_boresight_azim = ((np.sin(np.deg2rad(decl)) -
-                               np.sin(boresight_alt) *
-                               np.sin(latitude)) /
-                              (np.cos(boresight_alt) *
-                               np.cos(latitude)))
-
-        if cos_boresight_azim > 1:
-            cos_boresight_azim = 1
-        elif cos_boresight_azim < -1:
-            cos_boresight_azim = -1
-
-        # Don't forget to adjust the azimuth value
-        # depending on the hour angle
-        boresight_azim = np.arccos(cos_boresight_azim)
-        if hour_angle >= 0.:
-            boresight_azim = 2. * np.pi - boresight_azim
-
-        a_0 = (boresight_azim + np.deg2rad(beam_radius))
-        sin_ra_0 = (-np.sin(a_0) * np.sin(boresight_alt) /
-                    np.cos(np.deg2rad(decl)))
-        if sin_ra_0 > 1:
-            sin_ra_0 = 1
-        elif sin_ra_0 < -1:
-            sin_ra_0 = -1
-        ra_0 = np.arcsin(sin_ra_0)
-
-        beamwidth = np.rad2deg(ra_0)
-        # If the telescope is pointing exactly
-        # up the beam is circular
-        if straight_up:
-            beamwidth = beam_radius
-        # The height of the beam is always the same
-        # beamheight = beam_radius
-
-        return np.abs(beamwidth)
-
-    def _box_filter(self, c_ra, c_dec, beam_width, beam_height, table, cols, current_freq):
+    def _box_filter(self, c_ra, c_dec, beam_rad, table, cols, current_freq):
         """Returns a string which acts as a pre-filter for the more computationally
         intensive search
 
@@ -317,10 +249,8 @@ class Triage(DatabaseHandler):
         Parameters:
             c_ra, c_dec: (float)
                 Pointing coordinates of the telescope in radians
-            beam_width: (float)
-                Angular width radius of the primary beam in radians
-            beam_height: (float)
-                Angular height radius of the primary beam in radians
+            beam_rad: (float)
+                Angular radius of the primary beam in radians
             table: (str)
                 Table within database where
             cols: (list)
@@ -334,31 +264,27 @@ class Triage(DatabaseHandler):
         """
 
         current_band = self._freqBand(current_freq)
-        beam_rad_arcmin = beam_height * (180 / math.pi) * 60
+        beam_rad_arcmin = beam_rad * (180 / math.pi) * 60
 
-        logger.info("At {} ({}): ({}, {}),".format(self.freq_format(current_freq), current_band,
-                                                   np.rad2deg(c_ra), np.rad2deg(c_dec)))
-        logger.info("Beam height: {} radians = {} arc minutes"
-                    .format(beam_height, beam_rad_arcmin))
-        logger.info("Beam width: {} radians = {} arc minutes"
-                    .format(beam_width, beam_width * (180 / math.pi) * 60))
+        logger.info("Primary beam radius at {} ({}): {} radians = {} arc minutes"
+                    .format(self.freq_format(current_freq), current_band, beam_rad, beam_rad_arcmin))
 
-        if c_dec - beam_height <= - np.pi / 2.0:
+        if c_dec - beam_rad <= - np.pi / 2.0:
             ra_min, ra_max = 0.0, 2.0 * np.pi
             dec_min = -np.pi / 2.0
-            dec_max = c_dec + beam_height
+            dec_max = c_dec + beam_rad
 
-        elif c_dec + beam_height >= np.pi / 2.0:
+        elif c_dec + beam_rad >= np.pi / 2.0:
             ra_min, ra_max = 0.0, 2.0 * np.pi
-            dec_min = c_dec - beam_height
+            dec_min = c_dec - beam_rad
             dec_max = np.pi / 2.0
 
         else:
-            ra_offset = np.arcsin(np.sin(beam_height) / np.cos(c_dec))
+            ra_offset = np.arcsin(np.sin(beam_rad) / np.cos(c_dec))
             ra_min = c_ra - ra_offset
             ra_max = c_ra + ra_offset
-            dec_min = c_dec - beam_height
-            dec_max = c_dec + beam_height
+            dec_min = c_dec - beam_rad
+            dec_max = c_dec + beam_rad
 
         bounds = np.rad2deg([ra_min, ra_max, dec_min, dec_max])
 
@@ -490,7 +416,6 @@ class Triage(DatabaseHandler):
                        cols=None):
         """Returns a string to query the 1 million star database to find sources
            within some primary beam area
-
         Parameters:
             c_ra : (float)
                 Pointing coordinates of the telescope in radians (right ascension)
@@ -504,57 +429,26 @@ class Triage(DatabaseHandler):
                 Name of the MySQL table that is being queried
             cols: (list)
                 Columns of table to output
-
         Returns:
             target_list: (DataFrame)
                 Returns a pandas DataFrame containing the objects meeting the filter
                 criteria, sorted in order of priority
-
         """
 
         if not cols:
             cols = ['ra', 'decl', 'source_id', 'dist_c', 'table_name']
 
-        beam_width = np.deg2rad(self.get_beam_dimensions(decl=np.rad2deg(c_dec), beam_radius=np.rad2deg(beam_rad)))
-        beam_height = beam_rad
-
-        mask = self._box_filter(c_ra, c_dec, beam_width, beam_height, table, cols, current_freq)
-
-        if (c_ra + beam_width > 2 * math.pi) or (c_ra - beam_width < 0):
-            query_str = """(((POWER((RADIANS(ra) - {c_ra}), 2) +
-                      (POWER((RADIANS(decl) - {c_dec}), 2) *
-                      POWER(({beam_width} / {beam_height}), 2))) <
-                      (POWER({beam_width}, 2))) OR
-                      ((POWER((RADIANS(ra) - ((2 * PI()) + {c_ra})), 2) +
-                      (POWER((RADIANS(decl) - {c_dec}), 2) *
-                      POWER(({beam_width} / {beam_height}), 2))) <
-                      (POWER({beam_width}, 2))))"""\
-                .format(c_ra=c_ra, c_dec=c_dec, beam_height=beam_height, beam_width=beam_width)
-        else:
-            query_str = """((POWER((RADIANS(ra) - {c_ra}), 2) +
-                      (POWER((RADIANS(decl) - {c_dec}), 2) *
-                      POWER(({beam_width} / {beam_height}), 2))) <
-                      (POWER({beam_width}, 2)))"""\
-                .format(c_ra=c_ra, c_dec=c_dec, beam_height=beam_height, beam_width=beam_width)
+        mask = self._box_filter(c_ra, c_dec, beam_rad, table, cols, current_freq)
 
         query = """
                 SELECT *
                 FROM ({mask}) as T
-                WHERE {query_str}; \
-                """.format(mask=mask, query_str=query_str)
-
-        # query = """
-        #         SELECT *
-        #         FROM ({mask}) as T
-        #         WHERE ACOS( SIN(RADIANS(decl)) * SIN({c_dec}) + COS(RADIANS(decl)) *
-        #         COS({c_dec}) * COS({c_ra} - RADIANS(ra))) < SQRT({beam_height} * {beam_width}); \
-        #         """.format(mask=mask, c_ra=c_ra,
-        #                    c_dec=c_dec, beam_height=beam_height, beam_width=beam_width)
+                WHERE ACOS( SIN(RADIANS(decl)) * SIN({c_dec}) + COS(RADIANS(decl)) *
+                COS({c_dec}) * COS({c_ra} - RADIANS(ra))) < {beam_rad}; \
+                """.format(mask=mask, c_ra=c_ra,
+                           c_dec=c_dec, beam_rad=beam_rad)
 
         logger.info("\n{}\n".format(query))
-
-        # if not check_flag:
-        #     logger.info('Query:\n {}\n'.format(query))
 
         # TODO: replace with sqlalchemy queries
         tb = pd.read_sql(query, con=self.conn)
