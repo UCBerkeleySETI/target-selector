@@ -256,8 +256,8 @@ def createImage(params):
 
     fringeSum = 0
 
-    print(f"len(RotatedProjectedBaselines) = {len(RotatedProjectedBaselines)}")
-    print(f"len(uvSamples) = {len(uvSamples)}")
+    # print(f"len(RotatedProjectedBaselines) = {len(RotatedProjectedBaselines)}")
+    # print(f"len(uvSamples) = {len(uvSamples)}")
 
     for p in range(0, len(uvSamples)):
         U = imagesCoord[1] * uvSamples[p][0]
@@ -294,34 +294,45 @@ def find_contours(params, image):
 
 def fit_ellipse(params, contours):
     """
-    Returns an ellipse defined by six parameters ABCDEF.
-    The equation for the ellipse is:
-    Ax^2 + Bxy + Cy^2 + Dx + Ey + F = 0
+    Returns an ellipse defined by a tuple of parameters (A, B, C).
+    The equation for an ellipse centered at the origin is:
+    Ax^2 + Bxy + Cy^2 = 1
     where x is defined as the ra offset from params.ra_deg, and y is defined
     as the dec offset from params.dec_deg.
     """
     # We assume that the longest contour is the best one to fit an ellipse to.
     longest = max(contours, key=len)
 
-    # We use variables relative to params ra,dec so that we know we are looking for an ellipse
-    # centered at the origin.
+    # We use variables relative to params ra,dec.
     ras = np.array([ra - params.ra_deg for ra, _ in longest])
     decs = np.array([dec - params.dec_deg for _, dec in longest])
 
     # Code based on http://juddzone.com/ALGORITHMS/least_squares_ellipse.html
-    # for fitting an ellipse based at the origin
-    # In particular we use their insane variable names
+    # for fitting an ellipse, but we adjust because when the ellipse is centered
+    # at the origin, D and E must be zero.
     x = ras[:, np.newaxis]
     y = decs[:, np.newaxis]
-    J = np.hstack((x * x, x * y, y * y, x, y))
+    J = np.hstack((x * x, x * y, y * y))
     K = np.ones_like(x)
     JT = J.transpose()
     JTJ = np.dot(JT, J)
     InvJTJ = np.linalg.inv(JTJ)
     ABC = np.dot(InvJTJ, np.dot(JT, K))
-    eansa = np.append(ABC, -1)
 
-    return eansa
+    a, b, c = ABC.flatten()
+    if a <= 0 or c <= 0:
+        raise ValueError(f"we could not fit an ellipse. abc = {(a, b, c)}")
+    return a, b, c
+
+
+def evaluate_ellipse(ellipse, point):
+    """
+    0 is the ellipse center, 1 is the boundary, positive is outside the boundary.
+    Points are relative to the ra, dec center.
+    """
+    x, y = point
+    a, b, c = ellipse
+    return a * x * x + b * x * y + c * y * y
 
 
 def write_contours(contours, f):
@@ -337,10 +348,7 @@ def test_against_golden_output():
     contours = find_contours(params, image)
 
     ellipse = fit_ellipse(params, contours)
-
-    print(ellipse)
-    print(params.ra_deg)
-    print(params.dec_deg)
+    # print(ellipse)
 
     buf = io.StringIO()
     write_contours(contours, buf)
@@ -361,13 +369,10 @@ def test_ellipse():
     s = math.sqrt(2) / 2
     contours = [[(1, 0), (0, 1), (-1, 0), (0, -1), (s, s), (s, -s), (-s, s), (-s, -s)]]
     ellipse = fit_ellipse(params, contours)
-    a, b, c, d, e, f = ellipse
+    a, b, c = ellipse
     assert abs(a - 1) < 0.001
     assert abs(b) < 0.001
     assert abs(c - 1) < 0.001
-    assert abs(d) < 0.001
-    assert abs(e) < 0.001
-    assert abs(f + 1) < 0.001
 
 
 if __name__ == "__main__":
