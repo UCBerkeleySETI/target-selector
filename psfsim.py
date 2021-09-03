@@ -292,6 +292,13 @@ def find_contours(params, image):
 
 
 def fit_ellipse(params, contours):
+    """
+    Returns an ellipse defined by six parameters ABCDEF.
+    The equation for the ellipse is:
+    Ax^2 + Bxy + Cy^2 + Dx + Ey + F = 0
+    where x is defined as the ra offset from params.ra_deg, and y is defined
+    as the dec offset from params.dec_deg.
+    """
     # We assume that the longest contour is the best one to fit an ellipse to.
     longest = max(contours, key=len)
 
@@ -329,7 +336,10 @@ def test_against_golden_output():
     contours = find_contours(params, image)
 
     ellipse = fit_ellipse(params, contours)
+
     print(ellipse)
+    print(params.ra_deg)
+    print(params.dec_deg)
 
     buf = io.StringIO()
     write_contours(contours, buf)
