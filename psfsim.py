@@ -291,6 +291,31 @@ def find_contours(params, image):
     return output_contours
 
 
+def fit_ellipse(params, contours):
+    # We assume that the longest contour is the best one to fit an ellipse to.
+    longest = max(contours, key=len)
+
+    # We use variables relative to params ra,dec so that we know we are looking for an ellipse
+    # centered at the origin.
+    ras = np.array([ra - params.ra_deg for ra, _ in longest])
+    decs = np.array([dec - params.dec_deg for _, dec in longest])
+
+    # Code based on http://juddzone.com/ALGORITHMS/least_squares_ellipse.html
+    # for fitting an ellipse based at the origin
+    # In particular we use their insane variable names
+    x = ras[:, np.newaxis]
+    y = decs[:, np.newaxis]
+    J = np.hstack((x * x, x * y, y * y, x, y))
+    K = np.ones_like(x)
+    JT = J.transpose()
+    JTJ = np.dot(JT, J)
+    InvJTJ = np.linalg.inv(JTJ)
+    ABC = np.dot(InvJTJ, np.dot(JT, K))
+    eansa = np.append(ABC, -1)
+
+    return eansa
+
+
 def write_contours(contours, f):
     for contour in contours:
         for point in contour:
@@ -302,6 +327,10 @@ def test_against_golden_output():
     params = testParams()
     image = createImage(params)
     contours = find_contours(params, image)
+
+    ellipse = fit_ellipse(params, contours)
+    print(ellipse)
+
     buf = io.StringIO()
     write_contours(contours, buf)
 
