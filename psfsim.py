@@ -6,6 +6,7 @@ A simulator to figure out what region the telescope can observe.
 import csv
 import datetime
 import io
+import math
 import numpy as np
 import os
 import re
@@ -355,5 +356,20 @@ def test_against_golden_output():
     assert golden == output
 
 
+def test_ellipse():
+    params = Params(0, "0, 0", "")
+    s = math.sqrt(2) / 2
+    contours = [[(1, 0), (0, 1), (-1, 0), (0, -1), (s, s), (s, -s), (-s, s), (-s, -s)]]
+    ellipse = fit_ellipse(params, contours)
+    a, b, c, d, e, f = ellipse
+    assert abs(a - 1) < 0.001
+    assert abs(b) < 0.001
+    assert abs(c - 1) < 0.001
+    assert abs(d) < 0.001
+    assert abs(e) < 0.001
+    assert abs(f + 1) < 0.001
+
+
 if __name__ == "__main__":
     test_against_golden_output()
+    test_ellipse()
