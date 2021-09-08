@@ -285,8 +285,10 @@ def find_contours(params, image):
     for pixel_contour in pixel_contours:
         output_contour = []
         for x, y in pixel_contour:
-            ra_deg = (y - 250) / 3600 + params.ra_deg
-            dec_deg = (x - 250) / 3600 + params.dec_deg
+            # pixel_delta = imsize / 2
+            pixel_delta = 50
+            ra_deg = (y - pixel_delta) / 3600 + params.ra_deg
+            dec_deg = (x - pixel_delta) / 3600 + params.dec_deg
             output_contour.append((ra_deg, dec_deg))
         output_contours.append(output_contour)
     return output_contours
@@ -321,7 +323,7 @@ def fit_ellipse(params, contours):
 
     a, b, c = ABC.flatten()
     if a <= 0 or c <= 0:
-        raise ValueError(f"we could not fit an ellipse. abc = {(a, b, c)}")
+        raise ValueError("An ellipse could not be fitted. abc = ({}, {}, {})".format(a, b, c))
     return a, b, c
 
 
