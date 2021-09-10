@@ -2,8 +2,15 @@
 """
 Utilities to do geometry in ra,dec space.
 """
+import math
 import numpy as np
 import smallestenclosingcircle
+
+
+def distance(point1, point2):
+    x1, y1 = point1
+    x2, y2 = point2
+    return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
 
 class Target(object):
@@ -100,7 +107,13 @@ class Ellipse(object):
         self.b = b
         self.c = c
 
-    def evaluate(ra, decl):
+    def centered_at_origin(self):
+        """
+        A version of this ellipse that's translated to be centered at the origin.
+        """
+        return Ellipse(0, 0, self.a, self.b, self.c)
+
+    def evaluate(self, ra, decl):
         """
         The evaluation is 0 at the ellipse center, in [0, 1) inside the ellipse,
         1 at the boundary, and greater than 1 outside the ellipse.
@@ -108,3 +121,140 @@ class Ellipse(object):
         x = ra - self.ra
         y = decl - self.decl
         return self.a * x * x + self.b * x * y + self.c * y * y
+
+    def max_dec_point(self):
+        """
+        The point with largest decl, on the boundary of the ellipse.
+
+        From formula at:
+        https://math.stackexchange.com/questions/616645/determining-the-major-minor-axes-of-an-ellipse-from-general-form
+        """
+        z = 4 * self.a * self.c - self.b * self.b
+        assert z > 0
+
+        y_t = 2 * math.sqrt(self.a / z)
+        x_t = -0.5 * self.b * y_t / self.a
+        return (self.ra + x_t, self.decl + y_t)
+
+    def max_ra_point(self):
+        """
+        The point with largest ra, on the boundary of the ellipse.
+
+        From formula at:
+        https://math.stackexchange.com/questions/616645/determining-the-major-minor-axes-of-an-ellipse-from-general-form
+        """
+        z = 4 * self.a * self.c - self.b * self.b
+        assert z > 0
+
+        x_t = 2 * math.sqrt(self.c / z)
+        y_t = -0.5 * self.b * x_t / self.c
+        return (self.ra + x_t, self.decl + y_t)
+
+    def horizontal_ray_intersection(self):
+        """
+        The ra value for a point that intersects a ray moving in the positive-ra
+        direction from the center.
+        """
+        return self.ra + 1 / math.sqrt(self.a)
+
+    @staticmethod
+    def fit_with_center(center_ra, center_decl, points):
+        """
+        Create an ellipse with the center at (ra, decl) and using the provided points
+        to fit an ellipse as closely as possible.
+        Points are (ra, dec) tuples.
+        """
+        ras = np.array([ra - center_ra for (ra, _) in points])
+        decs = np.array([dec - center_decl for (_, dec) in points])
+
+        # Code based on http://juddzone.com/ALGORITHMS/least_squares_ellipse.html
+        # for fitting an ellipse, but we adjust because when the ellipse is centered
+        # at the origin, D and E must be zero.
+
+        x = ras[:, np.newaxis]
+        y = decs[:, np.newaxis]
+        J = np.hstack((x * x, x * y, y * y))
+        K = np.ones_like(x)
+        JT = J.transpose()
+        JTJ = np.dot(JT, J)
+        InvJTJ = np.linalg.inv(JTJ)
+        ABC = np.dot(InvJTJ, np.dot(JT, K))
+
+        a, b, c = ABC.flatten()
+        if a <= 0 or c <= 0:
+            raise ValueError(
+                "An ellipse could not be fitted. abc = ({}, {}, {})".format(a, b, c)
+            )
+
+        return Ellipse(center_ra, center_decl, a, b, c)
+
+
+class LinearTransform(object):
+    """
+    A linear transformation on the (ra, dec) space.
+    Can be defined as a 2x2 matrix.
+    """
+
+    def __init__(self, matrix):
+        """
+        Construct a transformation given the four components of its transform matrix.
+        """
+        self.matrix = matrix
+
+    @staticmethod
+    def from_elements(ra_ra, dec_ra, ra_dec, dec_dec):
+        """
+        Construct a transformation given the four components of its transform matrix.
+        Intuitively you can think of the meaning of parameter names like "dec_ra" as
+        "the influence of pre-transform-dec on post-transform ra", but you are also
+        free to not think about this too deeply.
+        """
+        return LinearTransform(np.array([[ra_ra, dec_ra], [ra_dec, dec_dec]]))
+
+    def transform_point(self, ra, dec):
+        return tuple(np.matmul(self.matrix, [ra, dec]))
+
+    def transform_target(self, target):
+        new_ra, new_decl = self.transform_point(target.ra, target.decl)
+        return Target(
+            target.index,
+            target.source_id,
+            new_ra,
+            new_decl,
+            target.priority,
+            target.dist_c,
+            target.table_name,
+        )
+
+    def invert(self):
+        return LinearTransform(np.linalg.inv(self.matrix))
+
+    @staticmethod
+    def to_unit_circle(ellipse):
+        """
+        Find a linear transform that would transform the provided ellipse into a unit circle.
+        This doesn't constrain to a single transformation, so for convenience we look for a
+        "shear" transformation that keeps the dec=0 axis fixed.
+        """
+        e = ellipse.centered_at_origin()
+
+        # This will go to (0, 1)
+        top_ra, top_dec = e.max_dec_point()
+
+        # (right_ra, 0) will go to (1, 0)
+        right_ra = e.horizontal_ray_intersection()
+
+        ra_ra = 1 / right_ra
+        ra_dec = 0
+        dec_dec = 1 / top_dec
+
+        # top_ra * ra_ra + top_dec * dec_ra = 0, therefore:
+        dec_ra = -1 * top_ra * ra_ra / top_dec
+
+        return LinearTransform.from_elements(ra_ra, dec_ra, ra_dec, dec_dec)
+
+
+if __name__ == "__main__":
+    e = Ellipse(0, 0, 1, 0, 1)
+    print(e.max_dec_point())
+    print(e.max_ra_point())

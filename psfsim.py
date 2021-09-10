@@ -5,6 +5,7 @@ A simulator to figure out what region the telescope can observe.
 
 import csv
 import datetime
+from geometry import distance, Ellipse, LinearTransform
 import io
 import math
 import numpy as np
@@ -294,39 +295,14 @@ def find_contours(params, image):
     return output_contours
 
 
-def fit_ellipse(params, contours):
+def fit_ellipse_to_contours(params, contours):
     """
-    Returns an ellipse defined by a tuple of parameters (A, B, C).
-    The equation for an ellipse centered at the origin is:
-    Ax^2 + Bxy + Cy^2 = 1
-    where x is defined as the ra offset from params.ra_deg, and y is defined
-    as the dec offset from params.dec_deg.
+    Returns an Ellipse that has the best fit to the provided contours.
     """
     # We assume that the longest contour is the best one to fit an ellipse to.
     longest = max(contours, key=len)
 
-    # We use variables relative to params ra,dec.
-    ras = np.array([ra - params.ra_deg for ra, _ in longest])
-    decs = np.array([dec - params.dec_deg for _, dec in longest])
-
-    # Code based on http://juddzone.com/ALGORITHMS/least_squares_ellipse.html
-    # for fitting an ellipse, but we adjust because when the ellipse is centered
-    # at the origin, D and E must be zero.
-    x = ras[:, np.newaxis]
-    y = decs[:, np.newaxis]
-    J = np.hstack((x * x, x * y, y * y))
-    K = np.ones_like(x)
-    JT = J.transpose()
-    JTJ = np.dot(JT, J)
-    InvJTJ = np.linalg.inv(JTJ)
-    ABC = np.dot(InvJTJ, np.dot(JT, K))
-
-    a, b, c = ABC.flatten()
-    if a <= 0 or c <= 0:
-        raise ValueError(
-            "An ellipse could not be fitted. abc = ({}, {}, {})".format(a, b, c)
-        )
-    return a, b, c
+    return Ellipse.fit_with_center(params.ra_deg, params.dec_deg, longest)
 
 
 def evaluate_ellipse(ellipse, point):
@@ -346,13 +322,29 @@ def write_contours(contours, f):
             writer.writerows([point])
 
 
+def assert_near(x, y):
+    assert abs(x - y) < 0.001
+
+
 def test_against_golden_output():
     params = testParams()
     image = createImage(params)
     contours = find_contours(params, image)
 
-    ellipse = fit_ellipse(params, contours)
-    # print(ellipse)
+    ellipse = fit_ellipse_to_contours(params, contours)
+
+    # Test some ellipse utils
+    ra, dec = ellipse.max_ra_point()
+    assert_near(ellipse.evaluate(ra, dec), 1)
+    ra, dec = ellipse.max_dec_point()
+    assert_near(ellipse.evaluate(ra, dec), 1)
+    ra = ellipse.horizontal_ray_intersection()
+    assert_near(ellipse.evaluate(ra, ellipse.decl), 1)
+
+    # Test the to_unit_circle transformation
+    longest = max(contours, key=len)
+    t = LinearTransform.to_unit_circle(ellipse)
+    center = t.transform_point(ellipse.ra, ellipse.decl)
 
     buf = io.StringIO()
     write_contours(contours, buf)
@@ -375,11 +367,10 @@ def test_ellipse():
     params = Params(0, "0, 0", "")
     s = math.sqrt(2) / 2
     contours = [[(1, 0), (0, 1), (-1, 0), (0, -1), (s, s), (s, -s), (-s, s), (-s, -s)]]
-    ellipse = fit_ellipse(params, contours)
-    a, b, c = ellipse
-    assert abs(a - 1) < 0.001
-    assert abs(b) < 0.001
-    assert abs(c - 1) < 0.001
+    ellipse = fit_ellipse_to_contours(params, contours)
+    assert_near(ellipse.a, 1)
+    assert_near(ellipse.b, 0)
+    assert_near(ellipse.c, 1)
 
 
 if __name__ == "__main__":
