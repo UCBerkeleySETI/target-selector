@@ -339,12 +339,12 @@ def test_against_golden_output():
     ra, dec = ellipse.max_dec_point()
     assert_near(ellipse.evaluate(ra, dec), 1)
     ra = ellipse.horizontal_ray_intersection()
-    assert_near(ellipse.evaluate(ra, ellipse.decl), 1)
+    assert_near(ellipse.evaluate(ra, ellipse.dec), 1)
 
     # Test the to_unit_circle transformation
     longest = max(contours, key=len)
     t = LinearTransform.to_unit_circle(ellipse)
-    center = t.transform_point(ellipse.ra, ellipse.decl)
+    center = t.transform_point(ellipse.ra, ellipse.dec)
 
     buf = io.StringIO()
     write_contours(contours, buf)

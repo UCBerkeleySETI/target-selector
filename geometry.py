@@ -19,11 +19,11 @@ class Target(object):
     Otherwise the data is precisely the data provided in redis.
     """
 
-    def __init__(self, index, source_id, ra, decl, priority, dist_c, table_name):
+    def __init__(self, index, source_id, ra, dec, priority, dist_c, table_name):
         self.index = index
         self.source_id = source_id
         self.ra = ra
-        self.decl = decl
+        self.dec = dec
         self.priority = priority
         self.dist_c = dist_c
         self.table_name = table_name
@@ -65,9 +65,9 @@ class Circle(object):
     A circle along with the set of Targets that is within it.
     """
 
-    def __init__(self, ra, decl, radius, targets):
+    def __init__(self, ra, dec, radius, targets):
         self.ra = ra
-        self.decl = decl
+        self.dec = dec
         self.radius = radius
         self.targets = targets
         self.recenter()
@@ -80,29 +80,29 @@ class Circle(object):
 
     def recenter(self):
         """
-        Alter ra and decl to minimize the maximum distance to any point.
+        Alter ra and dec to minimize the maximum distance to any point.
         """
-        points = [(t.ra, t.decl) for t in self.targets]
+        points = [(t.ra, t.dec) for t in self.targets]
         x, y, r = smallestenclosingcircle.make_circle(points)
         assert r < self.radius
-        self.ra, self.decl = x, y
+        self.ra, self.dec = x, y
 
 
 class Ellipse(object):
-    def __init__(self, ra, decl, a, b, c):
+    def __init__(self, ra, dec, a, b, c):
         """
         An ellipse centered at the origin can be defined with the equation:
         ax^2 + bxy + cy^2 = 1
         
-        This represents an ellipse of this shape, but centered at (ra, decl).
+        This represents an ellipse of this shape, but centered at (ra, dec).
         You can think of it as defining x and y as
         x = (ra - ellipse.ra)
-        y = (decl - ellipse.decl)
+        y = (dec - ellipse.dec)
 
         This way of defining an ellipse makes it easy to translate.
         """
         self.ra = ra
-        self.decl = decl
+        self.dec = dec
         self.a = a
         self.b = b
         self.c = c
@@ -113,18 +113,18 @@ class Ellipse(object):
         """
         return Ellipse(0, 0, self.a, self.b, self.c)
 
-    def evaluate(self, ra, decl):
+    def evaluate(self, ra, dec):
         """
         The evaluation is 0 at the ellipse center, in [0, 1) inside the ellipse,
         1 at the boundary, and greater than 1 outside the ellipse.
         """
         x = ra - self.ra
-        y = decl - self.decl
+        y = dec - self.dec
         return self.a * x * x + self.b * x * y + self.c * y * y
 
     def max_dec_point(self):
         """
-        The point with largest decl, on the boundary of the ellipse.
+        The point with largest dec, on the boundary of the ellipse.
 
         From formula at:
         https://math.stackexchange.com/questions/616645/determining-the-major-minor-axes-of-an-ellipse-from-general-form
@@ -134,7 +134,7 @@ class Ellipse(object):
 
         y_t = 2 * math.sqrt(self.a / z)
         x_t = -0.5 * self.b * y_t / self.a
-        return (self.ra + x_t, self.decl + y_t)
+        return (self.ra + x_t, self.dec + y_t)
 
     def max_ra_point(self):
         """
@@ -148,7 +148,7 @@ class Ellipse(object):
 
         x_t = 2 * math.sqrt(self.c / z)
         y_t = -0.5 * self.b * x_t / self.c
-        return (self.ra + x_t, self.decl + y_t)
+        return (self.ra + x_t, self.dec + y_t)
 
     def horizontal_ray_intersection(self):
         """
@@ -158,14 +158,14 @@ class Ellipse(object):
         return self.ra + 1 / math.sqrt(self.a)
 
     @staticmethod
-    def fit_with_center(center_ra, center_decl, points):
+    def fit_with_center(center_ra, center_dec, points):
         """
-        Create an ellipse with the center at (ra, decl) and using the provided points
+        Create an ellipse with the center at (ra, dec) and using the provided points
         to fit an ellipse as closely as possible.
         Points are (ra, dec) tuples.
         """
         ras = np.array([ra - center_ra for (ra, _) in points])
-        decs = np.array([dec - center_decl for (_, dec) in points])
+        decs = np.array([dec - center_dec for (_, dec) in points])
 
         # Code based on http://juddzone.com/ALGORITHMS/least_squares_ellipse.html
         # for fitting an ellipse, but we adjust because when the ellipse is centered
@@ -186,7 +186,7 @@ class Ellipse(object):
                 "An ellipse could not be fitted. abc = ({}, {}, {})".format(a, b, c)
             )
 
-        return Ellipse(center_ra, center_decl, a, b, c)
+        return Ellipse(center_ra, center_dec, a, b, c)
 
 
 class LinearTransform(object):
@@ -215,12 +215,12 @@ class LinearTransform(object):
         return tuple(np.matmul(self.matrix, [ra, dec]))
 
     def transform_target(self, target):
-        new_ra, new_decl = self.transform_point(target.ra, target.decl)
+        new_ra, new_dec = self.transform_point(target.ra, target.dec)
         return Target(
             target.index,
             target.source_id,
             new_ra,
-            new_decl,
+            new_dec,
             target.priority,
             target.dist_c,
             target.table_name,

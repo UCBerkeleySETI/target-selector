@@ -26,7 +26,7 @@ def optimize_circles(self, possible_targets, radius):
     Raises a RuntimeError if it cannot perform the optimization, usually if the data
     is degenerate in some way.
     """
-    arr = np.array([[p.ra, p.decl] for p in possible_targets])
+    arr = np.array([[p.ra, p.dec] for p in possible_targets])
     tree = KDTree(arr)
 
     # Find all pairs of points that could be captured by a single observation
@@ -38,7 +38,7 @@ def optimize_circles(self, possible_targets, radius):
         )
     )
 
-    # A list of (ra, decl) coordinates for the center of possible circles
+    # A list of (ra, dec) coordinates for the center of possible circles
     candidate_centers = []
 
     # Add one center for each of the targets that aren't part of any pairs
@@ -49,7 +49,7 @@ def optimize_circles(self, possible_targets, radius):
     for i in range(len(possible_targets)):
         if i not in in_a_pair:
             t = possible_targets[i]
-            candidate_centers.append((t.ra, t.decl))
+            candidate_centers.append((t.ra, t.dec))
 
     # Add two centers for each pair of targets that are close to each other
     for i0, i1 in pairs:
@@ -60,7 +60,7 @@ def optimize_circles(self, possible_targets, radius):
         # TODO: make the mathematical argument of this algorithm's sufficiency clearer
         r = 0.9999 * radius
         try:
-            c0, c1 = self.intersect_two_circles(p0.ra, p0.decl, r, p1.ra, p1.decl, r)
+            c0, c1 = self.intersect_two_circles(p0.ra, p0.dec, r, p1.ra, p1.dec, r)
             candidate_centers.append(c0)
             candidate_centers.append(c1)
         except ValueError:
@@ -76,9 +76,9 @@ def optimize_circles(self, possible_targets, radius):
     # Filter out any circles whose included targets are the same as a previous circle
     circles = []
     seen = set()
-    for (ra, decl), target_indexes in zip(candidate_centers, candidate_target_indexes):
+    for (ra, dec), target_indexes in zip(candidate_centers, candidate_target_indexes):
         targets = [possible_targets[i] for i in target_indexes]
-        circle = Circle(ra, decl, radius, targets)
+        circle = Circle(ra, dec, radius, targets)
         key = circle.key()
         if key in seen:
             continue
@@ -168,16 +168,16 @@ def write_csvs(selected_circles, selected_targets):
         priority_str = ", ".join(str(t.priority) for t in circle.targets)
         table_str = ", ".join(t.table_name for t in circle.targets)
         circles_to_observe.append(
-            [circle.ra, circle.decl, target_str, priority_str, dist_str, table_str]
+            [circle.ra, circle.dec, target_str, priority_str, dist_str, table_str]
         )
-        # print("Circle ({}, {}) contains targets {}".format(circle.ra, circle.decl, target_str))
+        # print("Circle ({}, {}) contains targets {}".format(circle.ra, circle.dec, target_str))
         for t in circle.targets:
             targets_to_observe.append(
                 [
                     t.ra,
-                    t.decl,
+                    t.dec,
                     circle.ra,
-                    circle.decl,
+                    circle.dec,
                     t.source_id,
                     t.priority,
                     t.dist_c,
