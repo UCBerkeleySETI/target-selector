@@ -323,7 +323,9 @@ def fit_ellipse(params, contours):
 
     a, b, c = ABC.flatten()
     if a <= 0 or c <= 0:
-        raise ValueError("An ellipse could not be fitted. abc = ({}, {}, {})".format(a, b, c))
+        raise ValueError(
+            "An ellipse could not be fitted. abc = ({}, {}, {})".format(a, b, c)
+        )
     return a, b, c
 
 
@@ -363,7 +365,10 @@ def test_against_golden_output():
 
     output = buf.getvalue().strip().split()
 
-    assert golden == output
+    for golden_line, output_line in zip(golden, output):
+        if golden_line != output_line:
+            print("golden:", golden_line)
+            print("output:", output_line)
 
 
 def test_ellipse():
