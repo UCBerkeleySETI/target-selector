@@ -10,3 +10,5 @@ config.yml
 
 data/
 delay/delay_movies
+
+*~

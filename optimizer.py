@@ -3,7 +3,7 @@
 Tools to optimize beam placement.
 """
 
-from geometry import Target, Circle
+from geometry import Circle, LinearTransform, Target
 import math
 import mip
 import scipy.constants as con
@@ -150,7 +150,29 @@ def optimize_circles(self, possible_targets, radius):
     return (selected_circles, selected_targets)
 
 
-def write_csvs(selected_circles, selected_targets):
+def optimize_ellipses(self, possible_targets, ellipse):
+    """
+    possible_targets is a list of Target objects.
+    ellipse defines the shape of our beam.
+
+    Returns a (beam_list, target_list) tuple containing the Beam and Target objects that
+    can be observed with the optimal beam placement.
+    """
+    # Find a transform that makes the beam look like a circle and transform our data.
+    t = LinearTransform.to_unit_circle(ellipse)
+    transformed_targets = [t.transform_target(target) for target in possible_targets]
+
+    # Solve the problem in the transformed space
+    circles, selected_targets = optimize_circles(transformed_targets, 1)
+
+    # Un-transform the answer
+    inverse = t.invert()
+    beams = [inverse.transform_beam(circle) for circle in circles]
+    beam_targets = [inverse.transform_target(target) for target in selected_targets]
+    return (beams, beam_targets)
+
+
+def write_csvs(selected_beams, selected_targets):
     """
     Write out some csvs to inspect the solution to an optimizer run.
     """
@@ -161,23 +183,23 @@ def write_csvs(selected_circles, selected_targets):
     for p, count in sorted(pcount.items()):
         print("{} of the targets have priority {}".format(count, p))
     targets_to_observe = []
-    circles_to_observe = []
-    for circle in selected_circles:
-        target_str = ", ".join(t.source_id for t in circle.targets)
-        dist_str = ", ".join(str(t.dist_c) for t in circle.targets)
-        priority_str = ", ".join(str(t.priority) for t in circle.targets)
-        table_str = ", ".join(t.table_name for t in circle.targets)
-        circles_to_observe.append(
-            [circle.ra, circle.dec, target_str, priority_str, dist_str, table_str]
+    beams_to_observe = []
+    for beam in selected_beams:
+        target_str = ", ".join(t.source_id for t in beam.targets)
+        dist_str = ", ".join(str(t.dist_c) for t in beam.targets)
+        priority_str = ", ".join(str(t.priority) for t in beam.targets)
+        table_str = ", ".join(t.table_name for t in beam.targets)
+        beams_to_observe.append(
+            [beam.ra, beam.dec, target_str, priority_str, dist_str, table_str]
         )
-        # print("Circle ({}, {}) contains targets {}".format(circle.ra, circle.dec, target_str))
-        for t in circle.targets:
+        # print("Beam ({}, {}) contains targets {}".format(beam.ra, beam.dec, target_str))
+        for t in beam.targets:
             targets_to_observe.append(
                 [
                     t.ra,
                     t.dec,
-                    circle.ra,
-                    circle.dec,
+                    beam.ra,
+                    beam.dec,
                     t.source_id,
                     t.priority,
                     t.dist_c,
@@ -185,7 +207,7 @@ def write_csvs(selected_circles, selected_targets):
                 ]
             )
 
-    circle_columns = [
+    beam_columns = [
         "ra",
         "decl",
         "source_id",
@@ -193,20 +215,20 @@ def write_csvs(selected_circles, selected_targets):
         "contained_dist_c",
         "contained_table",
     ]
-    circles_dict = {
-        k: [x[i] for x in circles_to_observe] for i, k in enumerate(circle_columns)
+    beams_dict = {
+        k: [x[i] for x in beams_to_observe] for i, k in enumerate(beam_columns)
     }
 
-    pd.DataFrame.to_csv(pd.DataFrame.from_dict(circles_dict), "beamform_beams.csv")
-    print(circles_dict)
+    pd.DataFrame.to_csv(pd.DataFrame.from_dict(beams_dict), "beamform_beams.csv")
+    print(beams_dict)
     # write_pair_redis(self.redis_server, "{}:current_obs:beamform_beams"
-    #                  .format(product_id), json.dumps(circles_dict))
+    #                  .format(product_id), json.dumps(beams_dict))
 
     target_columns = [
         "ra",
         "decl",
-        "circle_ra",
-        "circle_decl",
+        "beam_ra",
+        "beam_decl",
         "source_id",
         "priority",
         "dist_c",

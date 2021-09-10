@@ -60,23 +60,33 @@ class Target(object):
         ]
 
 
-class Circle(object):
+class Beam(object):
     """
-    A circle along with the set of Targets that is within it.
+    An object representing a beam aimed at a particular location, along with the targets
+    visible in that beam.
     """
 
-    def __init__(self, ra, dec, radius, targets):
+    def __init__(self, ra, dec, targets):
         self.ra = ra
         self.dec = dec
-        self.radius = radius
         self.targets = targets
-        self.recenter()
 
     def key(self):
         """
         A tuple key encoding the targets list.
         """
         return tuple(t.index for t in self.targets)
+
+
+class Circle(Beam):
+    """
+    A beam shaped like a circle.
+    """
+
+    def __init__(self, ra, dec, radius, targets):
+        super().__init__(ra, dec, targets)
+        self.radius = radius
+        self.recenter()
 
     def recenter(self):
         """
@@ -225,6 +235,11 @@ class LinearTransform(object):
             target.dist_c,
             target.table_name,
         )
+
+    def transform_beam(self, beam):
+        ra, dec = self.transform_point(beam.ra, beam.dec)
+        targets = [self.transform_target(t) for t in beam.targets]
+        return Beam(ra, dec, targets)
 
     def invert(self):
         return LinearTransform(np.linalg.inv(self.matrix))
