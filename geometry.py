@@ -242,6 +242,22 @@ class Ellipse(object):
 
         return Ellipse(center_ra, center_dec, a, b, c)
 
+    @staticmethod
+    def inscribe_with_center(center_ra, center_dec, points):
+        """
+        Create an ellipse with the center at (ra, dec) that approximates the shape of the
+        provided points, with the constraint that the ellipse does not contain any of
+        the points.
+        Points are (ra, dec) tuples.
+        """
+        fit = Ellipse.fit_with_center(center_ra, center_dec, points)
+        max_eval = max(fit.evaluate(ra, dec) for (ra, dec) in points)
+
+        scaling = 1 / math.sqrt(max_eval)
+        return Ellipse(
+            center_ra, center_dec, fit.a * scaling, fit.b * scaling, fit.c * scaling
+        )
+
 
 class LinearTransform(object):
     """

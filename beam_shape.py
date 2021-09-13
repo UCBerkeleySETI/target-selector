@@ -40,13 +40,14 @@ class BeamShape(object):
 
         if time is None:
             self.time = datetime.datetime.now()
-        else:
-            # self.time = time
+        elif type(time) is str:
             self.time = (
                 datetime.datetime.strptime(time, "%Y-%m-%d %H:%M:%S.%f")
                 .replace(tzinfo=datetime.timezone.utc)
                 .astimezone(tz=None)
             )
+        else:
+            self.time = time
 
     def create_image(self):
         # reference coordinates for MeerKAT (latitude, longitude, altitude?)
@@ -267,9 +268,10 @@ class BeamShape(object):
             self.contours.append(output_contour)
         return self.contours
 
-    def fit_ellipse(self):
+    def inscribe_ellipse(self):
         """
-        Returns an Ellipse fit as closely as possible to the 0.5 contour.
+        Returns an Ellipse that is approximately the same shape as but
+        entirely contained by the 0.5 contour.
         """
         image = self.create_image()
         contours = self.find_contours(image)
@@ -296,7 +298,9 @@ class BeamShape(object):
                 centred = (centred_ra, centred_dec)
                 writer.writerow(centred)
 
-        ellipse = Ellipse.fit_with_center(self.ra_deg, self.dec_deg, longest_contour)
+        ellipse = Ellipse.inscribe_with_center(
+            self.ra_deg, self.dec_deg, longest_contour
+        )
 
         with open("sanity_check/ellipse_vertices.csv", "w") as f:
             cols = ("ra", "decl")
@@ -351,7 +355,7 @@ def assert_near(x, y):
 
 def test_against_golden_output():
     shape = get_test_beam_shape()
-    ellipse = shape.fit_ellipse()
+    ellipse = shape.inscribe_ellipse()
 
     # Test some ellipse utils
     ra, dec = ellipse.max_ra_point()

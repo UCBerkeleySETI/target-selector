@@ -8,7 +8,7 @@ from optimizer_test_data import time, pool_resources, coordinates, frequency, ta
 assert __name__ == "__main__"
 
 shape = BeamShape(frequency, coordinates, pool_resources, time=time)
-ellipse = shape.fit_ellipse()
+ellipse = shape.inscribe_ellipse()
 possible_targets = Target.parse_targets(targets)
 beams, targets = optimizer.optimize_ellipses(
     possible_targets=possible_targets, ellipse=ellipse
