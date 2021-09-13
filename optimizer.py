@@ -3,17 +3,21 @@
 Tools to optimize beam placement.
 """
 
-from geometry import Circle, LinearTransform, Target
+import csv
 import math
 import mip
-import csv
-import scipy.constants as con
-import pandas as pd
 import numpy as np
+import os
+import pandas as pd
+import scipy.constants as con
 from scipy.spatial import KDTree
+
+from geometry import Circle, LinearTransform, Target
 
 # One target of priority n is worth priority_decay targets of priority n+1.
 priority_decay = 10
+
+NUM_BEAMS = int(os.getenv("NUM_BEAMS") or 64)
 
 
 def intersect_two_circles(x0, y0, r0, x1, y1, r1):
@@ -52,7 +56,7 @@ def intersect_two_circles(x0, y0, r0, x1, y1, r1):
 
 def optimize_circles(possible_targets, radius):
     """
-    Calculate the best-scoring 64 beams assuming each beam is a circle with the given radius.
+    Calculate the best-scoring NUM_BEAMS beams assuming each beam is a circle with the given radius.
     possible_targets is a list of Target objects.
 
     This returns (circle_list, target_list) containing the Circle and Target objects
@@ -95,7 +99,9 @@ def optimize_circles(possible_targets, radius):
         # TODO: make the mathematical argument of this algorithm's sufficiency clearer
         r = 0.9999 * radius
         try:
-            c0, c1 = intersect_two_circles(x0=p0.ra, y0=p0.dec, r0=r, x1=p1.ra, y1=p1.dec, r1=r)
+            c0, c1 = intersect_two_circles(
+                x0=p0.ra, y0=p0.dec, r0=r, x1=p1.ra, y1=p1.dec, r1=r
+            )
             candidate_centers.append(c0)
             candidate_centers.append(c1)
         except ValueError:
@@ -144,8 +150,8 @@ def optimize_circles(possible_targets, radius):
         model.add_var(name="c{n}", var_type=mip.BINARY) for n in range(len(circles))
     ]
 
-    # Add a constraint that we must select at most 64 circles
-    model += mip.xsum(circle_vars) <= 64
+    # Add a constraint that we must select at most NUM_BEAMS circles
+    model += mip.xsum(circle_vars) <= NUM_BEAMS
 
     # For each target, if its variable is 1 then at least one of its circles must also be 1
     circles_for_target = {}
@@ -198,7 +204,9 @@ def optimize_ellipses(possible_targets, ellipse):
     transformed_targets = [t.transform_target(target) for target in possible_targets]
 
     # Solve the problem in the transformed space
-    circles, selected_targets = optimize_circles(possible_targets=transformed_targets, radius=1)
+    circles, selected_targets = optimize_circles(
+        possible_targets=transformed_targets, radius=1
+    )
 
     # Un-transform the answer
     inverse = t.invert()
@@ -254,15 +262,17 @@ def write_csvs(selected_beams, selected_targets):
         k: [x[i] for x in beams_to_observe] for i, k in enumerate(beam_columns)
     }
 
-    pd.DataFrame.to_csv(pd.DataFrame.from_dict(beams_dict), "sanity_check/beamform_beams.csv")
+    pd.DataFrame.to_csv(
+        pd.DataFrame.from_dict(beams_dict), "sanity_check/beamform_beams.csv"
+    )
 
     # writing beam extent coordinates for checking purposes
     beamform_beams = pd.read_csv("sanity_check/beamform_beams.csv")
     contour_vertices = pd.read_csv("sanity_check/contour_vertices.csv")
-    beam_ra = beamform_beams['ra']
-    beam_dec = beamform_beams['decl']
-    contour_ra = contour_vertices['ra']
-    contour_dec = contour_vertices['decl']
+    beam_ra = beamform_beams["ra"]
+    beam_dec = beamform_beams["decl"]
+    contour_ra = contour_vertices["ra"]
+    contour_dec = contour_vertices["decl"]
     shifted_beams = []
     for n in range(0, len(beam_ra)):
         for m in range(0, len(contour_ra)):
@@ -292,7 +302,9 @@ def write_csvs(selected_beams, selected_targets):
         k: [x[i] for x in targets_to_observe] for i, k in enumerate(target_columns)
     }
 
-    pd.DataFrame.to_csv(pd.DataFrame.from_dict(targets_dict), "sanity_check/beamform_targets.csv")
+    pd.DataFrame.to_csv(
+        pd.DataFrame.from_dict(targets_dict), "sanity_check/beamform_targets.csv"
+    )
     # print(targets_dict)
     # write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets"
     #                  .format(product_id), json.dumps(targets_dict))
