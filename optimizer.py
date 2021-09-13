@@ -269,18 +269,30 @@ def write_csvs(selected_beams, selected_targets):
     # writing beam extent coordinates for checking purposes
     beamform_beams = pd.read_csv("sanity_check/beamform_beams.csv")
     contour_vertices = pd.read_csv("sanity_check/contour_vertices.csv")
+    ellipse_vertices = pd.read_csv("sanity_check/ellipse_vertices.csv")
     beam_ra = beamform_beams["ra"]
     beam_dec = beamform_beams["decl"]
     contour_ra = contour_vertices["ra"]
     contour_dec = contour_vertices["decl"]
-    shifted_beams = []
+    ellipse_ra = ellipse_vertices["ra"]
+    ellipse_dec = ellipse_vertices["decl"]
+    shifted_contours = []
+    shifted_ellipses = []
     for n in range(0, len(beam_ra)):
         for m in range(0, len(contour_ra)):
             shifted_ra = beam_ra[n] + contour_ra[m]
             shifted_dec = beam_dec[n] + contour_dec[m]
-            shifted_beams.append((shifted_ra, shifted_dec))
-    with open("sanity_check/shifted_beams.csv", "w") as f:
-        for item in shifted_beams:
+            shifted_contours.append((shifted_ra, shifted_dec))
+        for p in range(0, len(ellipse_ra)):
+            shifted_ra = beam_ra[n] + ellipse_ra[p]
+            shifted_dec = beam_dec[n] + ellipse_dec[p]
+            shifted_ellipses.append((shifted_ra, shifted_dec))
+    with open("sanity_check/shifted_contours.csv", "w") as f:
+        for item in shifted_contours:
+            writer = csv.writer(f)
+            writer.writerow(item)
+    with open("sanity_check/shifted_ellipses.csv", "w") as f:
+        for item in shifted_ellipses:
             writer = csv.writer(f)
             writer.writerow(item)
 
