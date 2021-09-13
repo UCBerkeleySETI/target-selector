@@ -13,9 +13,11 @@ ellipse = shape.inscribe_ellipse()
 possible_targets = Target.parse_targets(targets)
 # Write target list to csv for checking
 with open("sanity_check/fov_total_targets.csv", "w") as f:
+    cols = ("ra", "decl")
+    writer = csv.writer(f)
+    writer.writerow(cols)
     for item in possible_targets:
         coords = (item.ra, item.dec)
-        writer = csv.writer(f)
         writer.writerow(coords)
 
 beams, targets = optimizer.optimize_ellipses(
