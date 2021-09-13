@@ -35,8 +35,7 @@ class BeamShape(object):
         self.coords = coords
         self.antennas = ",".join(re.findall(r"m\d{3}", pool)).replace("m", "")
 
-        self.ra_deg = float(coords.split(", ")[0])
-        self.dec_deg = float(coords.split(", ")[1])
+        self.ra_deg, self.dec_deg = map(float, coords.split(", "))
 
         if time is None:
             self.time = datetime.datetime.now()
@@ -282,9 +281,9 @@ class BeamShape(object):
         # write the centred contour coordinates to file for checking
         ra_coords = []
         dec_coords = []
-        for a_tuple in longest_contour:
-            ra_coords.append(a_tuple[0])
-            dec_coords.append(a_tuple[1])
+        for ra, dec in longest_contour:
+            ra_coords.append(ra)
+            dec_coords.append(dec)
         mean_ra = sum(ra_coords) / len(longest_contour)
         mean_dec = sum(dec_coords) / len(longest_contour)
 
@@ -292,11 +291,11 @@ class BeamShape(object):
             cols = ("ra", "decl")
             writer = csv.writer(f)
             writer.writerow(cols)
-            for point in longest_contour:
-                centred_ra = point[0] - mean_ra
-                centred_dec = point[1] - mean_dec
-                centred = (centred_ra, centred_dec)
-                writer.writerow(centred)
+            for ra, dec in longest_contour:
+                centered_ra = ra - mean_ra
+                centered_dec = dec - mean_dec
+                centered = (centered_ra, centered_dec)
+                writer.writerow(centered)
 
         ellipse = Ellipse.inscribe_with_center(
             self.ra_deg, self.dec_deg, longest_contour
