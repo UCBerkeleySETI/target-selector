@@ -14,4 +14,10 @@ beams, targets = optimizer.optimize_ellipses(
     possible_targets=possible_targets, ellipse=ellipse
 )
 
+# Validate that the beam ellipses contain their targets
+for beam in beams:
+    e = ellipse.centered_at(beam.ra, beam.dec)
+    for target in beam.targets:
+        assert e.evaluate(target.ra, target.dec) <= 1
+
 optimizer.write_csvs(beams, targets)
