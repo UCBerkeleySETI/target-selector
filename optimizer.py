@@ -288,12 +288,16 @@ def write_csvs(selected_beams, selected_targets):
             shifted_dec = beam_dec[n] + ellipse_dec[p]
             shifted_ellipses.append((shifted_ra, shifted_dec))
     with open("sanity_check/shifted_contours.csv", "w") as f:
+        cols = ("ra", "decl")
+        writer = csv.writer(f)
+        writer.writerow(cols)
         for item in shifted_contours:
-            writer = csv.writer(f)
             writer.writerow(item)
     with open("sanity_check/shifted_ellipses.csv", "w") as f:
+        cols = ("ra", "decl")
+        writer = csv.writer(f)
+        writer.writerow(cols)
         for item in shifted_ellipses:
-            writer = csv.writer(f)
             writer.writerow(item)
 
     # print(beams_dict)
