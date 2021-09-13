@@ -10,5 +10,8 @@ assert __name__ == "__main__"
 shape = BeamShape(frequency, coordinates, pool_resources, time=time)
 ellipse = shape.fit_ellipse()
 possible_targets = Target.parse_targets(targets)
-beams, targets = optimizer.optimize_ellipses(possible_targets=possible_targets, ellipse=ellipse)
+beams, targets = optimizer.optimize_ellipses(
+    possible_targets=possible_targets, ellipse=ellipse
+)
+
 optimizer.write_csvs(beams, targets)

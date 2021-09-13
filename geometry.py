@@ -168,6 +168,41 @@ class Ellipse(object):
         """
         return self.ra + 1 / math.sqrt(self.a)
 
+    def ray_intersection(self, slope, right_side):
+        """
+        (ra, dec) for the point leaving the center of the ellipse with the given slope.
+        There are two solutions so if right_side we find the one with ra > self.ra,
+        if not right_side we return the one with ra < self.ra.
+        """
+        # For x = ra - self.ra, y = dec - self.dec
+        # y = mx
+        # Ax^2 + Bxy + Cy^2 = 1
+        # x = 1 / sqrt(A + Bm + Cm^2)
+        x = 1 / math.sqrt(self.a + self.b * slope + self.c * slope * slope)
+        if not right_side:
+            x = -x
+        y = slope * x
+        return (self.ra + x, self.dec + y)
+
+    def contour(self, num_points):
+        """
+        A list of (ra, dec) points that approximates the ellipse.
+        """
+        # Start with the rightmost half. theta is the angle from the origin,
+        # it goes from -pi/2 to +pi/2 but not quite to the edge.
+        epsilon = math.pi / 100
+        start = -math.pi / 2
+        end = math.pi / 2
+        first_half = []
+        second_half = []
+        half_size = num_points // 2
+        for i in range(half_size):
+            theta = start + (i + 0.5) * (end - start) / half_size
+            slope = math.tan(theta)
+            first_half.append(self.ray_intersection(slope, True))
+            second_half.append(self.ray_intersection(slope, False))
+        return first_half + second_half
+
     @staticmethod
     def fit_with_center(center_ra, center_dec, points):
         """
@@ -271,6 +306,6 @@ class LinearTransform(object):
 
 
 if __name__ == "__main__":
-    e = Ellipse(0, 0, 1, 0, 1)
-    print(e.max_dec_point())
-    print(e.max_ra_point())
+    e = Ellipse(3, 7, 1, 0, 1)
+    for point in e.contour(18):
+        assert abs(distance(point, (3, 7)) - 1) < 0.01
