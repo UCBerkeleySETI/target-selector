@@ -275,28 +275,35 @@ class BeamShape(object):
         contours = self.find_contours(image)
 
         # We assume that the longest contour is the best one to fit an ellipse to.
-        longest = max(contours, key=len)
+        longest_contour = max(contours, key=len)
 
         # write the centred contour coordinates to file for checking
         ra_coords = []
         dec_coords = []
-        for a_tuple in longest:
+        for a_tuple in longest_contour:
             ra_coords.append(a_tuple[0])
             dec_coords.append(a_tuple[1])
-        mean_ra = sum(ra_coords) / len(longest)
-        mean_dec = sum(dec_coords) / len(longest)
+        mean_ra = sum(ra_coords) / len(longest_contour)
+        mean_dec = sum(dec_coords) / len(longest_contour)
 
         with open("sanity_check/contour_vertices.csv", "w") as f:
             cols = ("ra", "decl")
             writer = csv.writer(f)
             writer.writerow(cols)
-            for item in longest:
-                centred_ra = item[0] - mean_ra
-                centred_dec = item[1] - mean_dec
+            for point in longest_contour:
+                centred_ra = point[0] - mean_ra
+                centred_dec = point[1] - mean_dec
                 centred = (centred_ra, centred_dec)
                 writer.writerow(centred)
 
-        ellipse = Ellipse.fit_with_center(self.ra_deg, self.dec_deg, longest)
+        ellipse = Ellipse.fit_with_center(self.ra_deg, self.dec_deg, longest_contour)
+
+        with open("sanity_check/ellipse_vertices.csv", "w") as f:
+            cols = ("ra", "decl")
+            writer = csv.writer(f)
+            writer.writerow(cols)
+            for point in ellipse.centered_at(0, 0).contour(300):
+                writer.writerow(point)
 
         return ellipse
 
