@@ -34,6 +34,11 @@ class Target(object):
         priority_decay = 10
         self.score = int(priority_decay ** (7 - self.priority))
 
+    def __str__(self):
+        return "target {}, priority {}, at ({:.3f}, {:.3f})".format(
+            self.index, self.priority, self.ra, self.dec
+        )
+
     @staticmethod
     def parse_targets(targets_dict):
         """
@@ -78,6 +83,9 @@ class Beam(object):
         """
         return tuple(t.index for t in self.targets)
 
+    def __str__(self):
+        return "beam at ({:.3f}, {:.3f})".format(self.ra, self.dec)
+
 
 class Circle(Beam):
     """
@@ -118,11 +126,11 @@ class Ellipse(object):
         self.b = b
         self.c = c
 
-    def centered_at_origin(self):
+    def centered_at(self, ra, dec):
         """
-        A version of this ellipse that's translated to be centered at the origin.
+        A version of this ellipse that's translated to have the given center.
         """
-        return Ellipse(0, 0, self.a, self.b, self.c)
+        return Ellipse(ra, dec, self.a, self.b, self.c)
 
     def evaluate(self, ra, dec):
         """
@@ -287,7 +295,7 @@ class LinearTransform(object):
         This doesn't constrain to a single transformation, so for convenience we look for a
         "shear" transformation that keeps the dec=0 axis fixed.
         """
-        e = ellipse.centered_at_origin()
+        e = ellipse.centered_at(0, 0)
 
         # This will go to (0, 1)
         top_ra, top_dec = e.max_dec_point()
