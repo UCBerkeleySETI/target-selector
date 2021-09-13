@@ -254,10 +254,11 @@ def write_csvs(selected_beams, selected_targets):
         k: [x[i] for x in beams_to_observe] for i, k in enumerate(beam_columns)
     }
 
-    pd.DataFrame.to_csv(pd.DataFrame.from_dict(beams_dict), "beamform_beams.csv")
+    pd.DataFrame.to_csv(pd.DataFrame.from_dict(beams_dict), "sanity_check/beamform_beams.csv")
 
-    beamform_beams = pd.read_csv("beamform_beams.csv")
-    contour_vertices = pd.read_csv("contour_vertices.csv")
+    # writing beam extent coordinates for checking purposes
+    beamform_beams = pd.read_csv("sanity_check/beamform_beams.csv")
+    contour_vertices = pd.read_csv("sanity_check/contour_vertices.csv")
     beam_ra = beamform_beams['ra']
     beam_dec = beamform_beams['decl']
     contour_ra = contour_vertices['ra']
@@ -268,18 +269,10 @@ def write_csvs(selected_beams, selected_targets):
             shifted_ra = beam_ra[n] + contour_ra[m]
             shifted_dec = beam_dec[n] + contour_dec[m]
             shifted_beams.append((shifted_ra, shifted_dec))
-    with open("shifted_beams.csv", "w") as f:
+    with open("sanity_check/shifted_beams.csv", "w") as f:
         for item in shifted_beams:
             writer = csv.writer(f)
             writer.writerow(item)
-
-    # ITERATE OVER BEAMFORM BEAMS COORDINATES
-    # ITERATE OVER CONTOUR VERTEX COORDINATES
-    # ADD THESE
-    # APPEND TO A LIST
-    # WRITE LIST TO CSV
-
-
 
     # print(beams_dict)
     # write_pair_redis(self.redis_server, "{}:current_obs:beamform_beams"
@@ -299,7 +292,7 @@ def write_csvs(selected_beams, selected_targets):
         k: [x[i] for x in targets_to_observe] for i, k in enumerate(target_columns)
     }
 
-    pd.DataFrame.to_csv(pd.DataFrame.from_dict(targets_dict), "beamform_targets.csv")
+    pd.DataFrame.to_csv(pd.DataFrame.from_dict(targets_dict), "sanity_check/beamform_targets.csv")
     # print(targets_dict)
     # write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets"
     #                  .format(product_id), json.dumps(targets_dict))

@@ -281,7 +281,7 @@ class BeamShape(object):
             dec_coords.append(a_tuple[1])
         mean_ra = sum(ra_coords) / len(longest)
         mean_dec = sum(dec_coords) / len(longest)
-        with open("contour_vertices.csv", "w") as f:
+        with open("sanity_check/contour_vertices.csv", "w") as f:
             cols = ('ra', 'decl')
             writer = csv.writer(f)
             writer.writerow(cols)
@@ -358,7 +358,7 @@ def test_against_golden_output():
     write_contours(shape.contours, buf)
 
     golden = (
-        open(os.path.join(os.path.dirname(__file__), "test", "contour_vertices.csv"))
+        open(os.path.join(os.path.dirname(__file__), "test", "sanity_check/contour_vertices.csv"))
         .read()
         .split()
     )
