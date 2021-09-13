@@ -6,6 +6,7 @@ Tools to optimize beam placement.
 from geometry import Circle, LinearTransform, Target
 import math
 import mip
+import csv
 import scipy.constants as con
 import pandas as pd
 import numpy as np
@@ -15,7 +16,41 @@ from scipy.spatial import KDTree
 priority_decay = 10
 
 
-def optimize_circles(self, possible_targets, radius):
+def intersect_two_circles(x0, y0, r0, x1, y1, r1):
+    """
+    Finding the intersections of two circles.
+
+    Thanks to:
+    https://stackoverflow.com/questions/55816902/finding-the-intersection-of-two-circles
+    """
+    # circle 1: (x0, y0), radius r0
+    # circle 2: (x1, y1), radius r1
+
+    d = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
+
+    if d > r0 + r1:
+        raise ValueError("The circles are non-intersecting")
+
+    if d < abs(r0 - r1):
+        raise ValueError("One circle is within the other")
+
+    if d == 0 and r0 == r1:
+        raise ValueError("The circles are coincident")
+
+    a = (r0 ** 2 - r1 ** 2 + d ** 2) / (2 * d)
+    h = math.sqrt(r0 ** 2 - a ** 2)
+    x2 = x0 + a * (x1 - x0) / d
+    y2 = y0 + a * (y1 - y0) / d
+    x3 = x2 + h * (y1 - y0) / d
+    y3 = y2 - h * (x1 - x0) / d
+
+    x4 = x2 - h * (y1 - y0) / d
+    y4 = y2 + h * (x1 - x0) / d
+
+    return ((x3, y3), (x4, y4))
+
+
+def optimize_circles(possible_targets, radius):
     """
     Calculate the best-scoring 64 beams assuming each beam is a circle with the given radius.
     possible_targets is a list of Target objects.
@@ -60,7 +95,7 @@ def optimize_circles(self, possible_targets, radius):
         # TODO: make the mathematical argument of this algorithm's sufficiency clearer
         r = 0.9999 * radius
         try:
-            c0, c1 = self.intersect_two_circles(p0.ra, p0.dec, r, p1.ra, p1.dec, r)
+            c0, c1 = intersect_two_circles(x0=p0.ra, y0=p0.dec, r0=r, x1=p1.ra, y1=p1.dec, r1=r)
             candidate_centers.append(c0)
             candidate_centers.append(c1)
         except ValueError:
@@ -150,7 +185,7 @@ def optimize_circles(self, possible_targets, radius):
     return (selected_circles, selected_targets)
 
 
-def optimize_ellipses(self, possible_targets, ellipse):
+def optimize_ellipses(possible_targets, ellipse):
     """
     possible_targets is a list of Target objects.
     ellipse defines the shape of our beam.
@@ -163,7 +198,7 @@ def optimize_ellipses(self, possible_targets, ellipse):
     transformed_targets = [t.transform_target(target) for target in possible_targets]
 
     # Solve the problem in the transformed space
-    circles, selected_targets = optimize_circles(transformed_targets, 1)
+    circles, selected_targets = optimize_circles(possible_targets=transformed_targets, radius=1)
 
     # Un-transform the answer
     inverse = t.invert()
@@ -220,7 +255,33 @@ def write_csvs(selected_beams, selected_targets):
     }
 
     pd.DataFrame.to_csv(pd.DataFrame.from_dict(beams_dict), "beamform_beams.csv")
-    print(beams_dict)
+
+    beamform_beams = pd.read_csv("beamform_beams.csv")
+    contour_vertices = pd.read_csv("contour_vertices.csv")
+    beam_ra = beamform_beams['ra']
+    beam_dec = beamform_beams['decl']
+    contour_ra = contour_vertices['ra']
+    contour_dec = contour_vertices['decl']
+    shifted_beams = []
+    for n in range(0, len(beam_ra)):
+        for m in range(0, len(contour_ra)):
+            shifted_ra = beam_ra[n] + contour_ra[m]
+            shifted_dec = beam_dec[n] + contour_dec[m]
+            shifted_beams.append((shifted_ra, shifted_dec))
+    with open("shifted_beams.csv", "w") as f:
+        for item in shifted_beams:
+            writer = csv.writer(f)
+            writer.writerow(item)
+
+    # ITERATE OVER BEAMFORM BEAMS COORDINATES
+    # ITERATE OVER CONTOUR VERTEX COORDINATES
+    # ADD THESE
+    # APPEND TO A LIST
+    # WRITE LIST TO CSV
+
+
+
+    # print(beams_dict)
     # write_pair_redis(self.redis_server, "{}:current_obs:beamform_beams"
     #                  .format(product_id), json.dumps(beams_dict))
 
@@ -239,6 +300,6 @@ def write_csvs(selected_beams, selected_targets):
     }
 
     pd.DataFrame.to_csv(pd.DataFrame.from_dict(targets_dict), "beamform_targets.csv")
-    print(targets_dict)
+    # print(targets_dict)
     # write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets"
     #                  .format(product_id), json.dumps(targets_dict))

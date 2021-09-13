@@ -31,6 +31,7 @@ class Target(object):
         # Targets with a lower priority have a higher score.
         # We are maximizing score of all targets.
         # The maximum priority is 7.
+        priority_decay = 10
         self.score = int(priority_decay ** (7 - self.priority))
 
     @staticmethod
@@ -49,12 +50,12 @@ class Target(object):
             Target(index, *args)
             for (index, args) in enumerate(
                 zip(
-                    targets["source_id"],
-                    targets["ra"],
-                    targets["decl"],
-                    targets["priority"],
-                    targets["dist_c"],
-                    targets["table_name"],
+                    targets_dict["source_id"],
+                    targets_dict["ra"],
+                    targets_dict["decl"],
+                    targets_dict["priority"],
+                    targets_dict["dist_c"],
+                    targets_dict["table_name"],
                 )
             )
         ]

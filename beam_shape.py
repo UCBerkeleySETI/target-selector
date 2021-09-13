@@ -38,7 +38,9 @@ class BeamShape(object):
         if time is None:
             self.time = datetime.datetime.now()
         else:
-            self.time = time
+            # self.time = time
+            self.time = datetime.datetime.strptime(time, '%Y-%m-%d %H:%M:%S.%f')\
+                .replace(tzinfo=datetime.timezone.utc).astimezone(tz=None)
 
     def create_image(self):
         # reference coordinates for MeerKAT (latitude, longitude, altitude?)
@@ -270,6 +272,24 @@ class BeamShape(object):
 
         # We assume that the longest contour is the best one to fit an ellipse to.
         longest = max(contours, key=len)
+
+        # write the centred contour coordinates to file for checking
+        ra_coords = []
+        dec_coords = []
+        for a_tuple in longest:
+            ra_coords.append(a_tuple[0])
+            dec_coords.append(a_tuple[1])
+        mean_ra = sum(ra_coords) / len(longest)
+        mean_dec = sum(dec_coords) / len(longest)
+        with open("contour_vertices.csv", "w") as f:
+            cols = ('ra', 'decl')
+            writer = csv.writer(f)
+            writer.writerow(cols)
+            for item in longest:
+                centred_ra = item[0] - mean_ra
+                centred_dec = item[1] - mean_dec
+                centred = (centred_ra, centred_dec)
+                writer.writerow(centred)
 
         ellipse = Ellipse.fit_with_center(self.ra_deg, self.dec_deg, longest)
 
