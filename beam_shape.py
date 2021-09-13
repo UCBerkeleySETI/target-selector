@@ -16,6 +16,9 @@ import scipy.constants as con
 from skimage import measure
 from mk_target_selector.redis_tools import get_redis_key, connect_to_redis
 
+# The image size to use for creating images for contours
+IMAGE_SIZE = 200
+
 
 class BeamShape(object):
     """
@@ -39,8 +42,11 @@ class BeamShape(object):
             self.time = datetime.datetime.now()
         else:
             # self.time = time
-            self.time = datetime.datetime.strptime(time, '%Y-%m-%d %H:%M:%S.%f')\
-                .replace(tzinfo=datetime.timezone.utc).astimezone(tz=None)
+            self.time = (
+                datetime.datetime.strptime(time, "%Y-%m-%d %H:%M:%S.%f")
+                .replace(tzinfo=datetime.timezone.utc)
+                .astimezone(tz=None)
+            )
 
     def create_image(self):
         # reference coordinates for MeerKAT (latitude, longitude, altitude?)
@@ -52,7 +58,6 @@ class BeamShape(object):
 
         # ASDF
         gridNum = 100000 * 2
-        imsize = 200
 
         # list of numbers of antennas currently in use (i.e. 001, 002, 003,...)
         antlist = [int(a) for a in self.antennas.split(",")]
@@ -185,7 +190,7 @@ class BeamShape(object):
         DFT grid
         """
 
-        halfLength = imsize / 2
+        halfLength = IMAGE_SIZE / 2
         interval = 1
 
         ul = np.mgrid[0:halfLength:interval, 0:halfLength:interval]
@@ -236,7 +241,7 @@ class BeamShape(object):
             weight = WeightingList[p]
             fringeSum += weight * np.exp(1j * 2 * con.pi * (U + V) / gridNum)
 
-        fringeSum = fringeSum.reshape(imsize, imsize) / len(uvSamples)
+        fringeSum = fringeSum.reshape(IMAGE_SIZE, IMAGE_SIZE) / len(uvSamples)
         fringeSum = np.abs(fringeSum)
 
         image = np.fft.fftshift(fringeSum)
@@ -255,8 +260,7 @@ class BeamShape(object):
         for pixel_contour in pixel_contours:
             output_contour = []
             for x, y in pixel_contour:
-                # pixel_delta = imsize / 2
-                pixel_delta = 50
+                pixel_delta = IMAGE_SIZE / 2
                 ra_deg = (y - pixel_delta) / 3600 + self.ra_deg
                 dec_deg = (x - pixel_delta) / 3600 + self.dec_deg
                 output_contour.append((ra_deg, dec_deg))
@@ -281,8 +285,9 @@ class BeamShape(object):
             dec_coords.append(a_tuple[1])
         mean_ra = sum(ra_coords) / len(longest)
         mean_dec = sum(dec_coords) / len(longest)
+
         with open("sanity_check/contour_vertices.csv", "w") as f:
-            cols = ('ra', 'decl')
+            cols = ("ra", "decl")
             writer = csv.writer(f)
             writer.writerow(cols)
             for item in longest:
@@ -358,7 +363,11 @@ def test_against_golden_output():
     write_contours(shape.contours, buf)
 
     golden = (
-        open(os.path.join(os.path.dirname(__file__), "test", "sanity_check/contour_vertices.csv"))
+        open(
+            os.path.join(
+                os.path.dirname(__file__), "test", "sanity_check/contour_vertices.csv"
+            )
+        )
         .read()
         .split()
     )
