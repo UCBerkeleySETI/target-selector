@@ -324,3 +324,4 @@ def write_csvs(selected_beams, selected_targets):
     # print(targets_dict)
     # write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets"
     #                  .format(product_id), json.dumps(targets_dict))
+

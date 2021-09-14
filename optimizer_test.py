@@ -4,6 +4,7 @@ from beam_shape import BeamShape, write_contours
 import optimizer
 import csv
 from geometry import Target
+from test_plot import test_plot
 from optimizer_test_data import time, pool_resources, coordinates, frequency, targets
 
 assert __name__ == "__main__"
@@ -31,3 +32,6 @@ for beam in beams:
         assert e.evaluate(target.ra, target.dec) <= 1
 
 optimizer.write_csvs(beams, targets)
+
+# plot the outputted CSVs for sanity checking
+test_plot()
