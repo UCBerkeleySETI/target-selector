@@ -28,19 +28,20 @@ def test_plot():
     shifted_ellipses_ra = shifted_ellipses['ra']
     shifted_ellipses_decl = shifted_ellipses['decl']
 
-    # fig = plt.figure()
+    fig = plt.figure()
     # ax = fig.add_subplot()
     # axins = fig.add_subplot(122)
+    ax = fig.add_subplot(111, aspect='equal')
 
     plt.xlabel("Right Ascension (deg)")
     plt.ylabel("Declination (deg)")
 
-    plt.scatter(shifted_contours_ra, shifted_contours_decl, s=0.001, marker=",", color='pink')
-    plt.scatter(shifted_ellipses_ra, shifted_ellipses_decl, s=0.001, marker=",", color='cyan')
-    plt.scatter(targets_all_ra, targets_all_dec, s=0.01, marker="x", color='black')
-    # plt.scatter(beamform_coords_ra, beamform_coords_decl, s=0.001, marker=",", color='green')
-    plt.scatter(beamform_targets_ra, beamform_targets_decl, s=0.01, marker="x", color='blue')
-    # plt.set_aspect('equal')
+    ax.scatter(shifted_contours_ra, shifted_contours_decl, s=0.00000001, marker=",", color='pink', linewidths=0.1)
+    ax.scatter(shifted_ellipses_ra, shifted_ellipses_decl, s=0.00000001, marker=",", color='cyan', linewidths=0.1)
+    ax.scatter(targets_all_ra, targets_all_dec, s=0.01, marker="x", color='black')
+    # ax.scatter(beamform_coords_ra, beamform_coords_decl, s=0.001, marker=",", color='green')
+    ax.scatter(beamform_targets_ra, beamform_targets_decl, s=0.01, marker="x", color='blue')
+    # ax.set_aspect('equal')
 
     # # sub region of the original image
     # x1, x2, y1, y2 = 45.25, 45.75, -31.4, -31.0
@@ -56,8 +57,8 @@ def test_plot():
     #     axins.add_patch(beamform_zoom)
     # axins.set_aspect('equal')
 
-    plt.xticks(visible=False)
-    plt.yticks(visible=False)
+    # plt.xticks(visible=False)
+    # plt.yticks(visible=False)
 
     # draw a bbox of the region of the inset axes in the parent axes and
     # connecting lines between the bbox and the inset axes area
