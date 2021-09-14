@@ -7,6 +7,21 @@ import numpy as np
 import smallestenclosingcircle
 
 
+def attenuation(x):
+    """
+    The cosine-tapered field function, where x = rho / theta_b.
+    See section 2.2.2 in https://iopscience.iop.org/article/10.3847/1538-4357/ab5d2d
+
+    Key values:
+    attenuation(0) = 1
+    attenuation(0.5) = 0.5
+    """
+    k = 1.1889647809329454
+    numer = math.cos(k * math.pi * x)
+    denom = 1 - 4 * k * k * x * x
+    return (numer / denom) ** 2
+
+
 def distance(point1, point2):
     x1, y1 = point1
     x2, y2 = point2
@@ -85,6 +100,26 @@ class Beam(object):
 
     def __str__(self):
         return "beam at ({:.3f}, {:.3f})".format(self.ra, self.dec)
+
+
+def find_zero(f, x, y, epsilon=3e-16):
+    """
+    Find the number where f(z) = 0, given x and y where f(x) < 0 and f(y) > 0.
+    Get within epsilon.
+    """
+    assert f(y) > 0
+    assert f(x) < 0
+
+    z = (x + y) / 2
+    if abs(x - y) < epsilon:
+        return z
+
+    result = f(z)
+    if result == 0:
+        return z
+    if result < 0:
+        return find_zero(f, z, y, epsilon=epsilon)
+    return find_zero(f, x, z, epsilon=epsilon)
 
 
 class Circle(Beam):
