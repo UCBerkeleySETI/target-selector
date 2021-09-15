@@ -12,7 +12,7 @@ import pandas as pd
 import scipy.constants as con
 from scipy.spatial import KDTree
 
-from geometry import Circle, LinearTransform, Target
+from geometry import attenuation, distance, Circle, LinearTransform, Target
 
 # One target of priority n is worth priority_decay targets of priority n+1.
 priority_decay = 10
@@ -188,6 +188,9 @@ def optimize_circles(possible_targets, radius):
         if target_var.x > 1e-6:
             selected_targets.append(target)
 
+    for c in selected_circles:
+        c.recenter()
+
     return (selected_circles, selected_targets)
 
 
@@ -324,4 +327,3 @@ def write_csvs(selected_beams, selected_targets):
     # print(targets_dict)
     # write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets"
     #                  .format(product_id), json.dumps(targets_dict))
-

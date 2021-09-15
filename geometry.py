@@ -5,6 +5,7 @@ Utilities to do geometry in ra,dec space.
 import math
 import numpy as np
 import scipy.constants as con
+from scipy.optimize import minimize
 import smallestenclosingcircle
 
 
@@ -144,9 +145,8 @@ class Circle(Beam):
     def __init__(self, ra, dec, radius, targets):
         super().__init__(ra, dec, targets)
         self.radius = radius
-        self.recenter()
 
-    def recenter(self):
+    def recenter_minimizing_max_distance(self):
         """
         Alter ra and dec to minimize the maximum distance to any point.
         """
@@ -154,6 +154,46 @@ class Circle(Beam):
         x, y, r = smallestenclosingcircle.make_circle(points)
         assert r < self.radius
         self.ra, self.dec = x, y
+
+    def recenter_optimizing_attenuation(self):
+        """
+        Find the optimal center based on attenuated score.
+        (ra, dec) is an estimate of the optimal center, which we use to speed up our
+        optimization.
+        """
+        # For fast optimization, we want our scoring function to be concave.
+        # We also want to forbid any center further than radius for one of the targets.
+        # So we add a penalty for excessive distance that is enough to make the score
+        # of any center that's on the boundary to be zero.
+        # We find a bound for the score so that we can be sure this penalty is large enough.
+        total_score = sum(t.score for t in self.targets)
+
+        # We are minimizing a loss function
+        def loss_function(point):
+            answer = 0
+            for target in self.targets:
+                dist = distance(point, (target.ra, target.dec))
+                normalized_dist = dist / self.radius
+                answer += target.score * attenuation(normalized_dist / 2)
+                if normalized_dist > 0.99:
+                    # Add a large penalty
+                    answer -= 100 * (normalized_dist - 0.99) * total_score
+            # Make it negative so it's a "loss function"
+            return -answer
+
+        x0 = np.array([self.ra, self.dec])
+        optimal = minimize(loss_function, x0, method="BFGS").x
+
+        self.ra, self.dec = tuple(optimal)
+
+    def recenter(self):
+        """
+        Recenter the circle, picking an appropriate method.
+        """
+        if len(self.targets) <= 2:
+            self.recenter_minimizing_max_distance()
+        else:
+            self.recenter_optimizing_attenuation()
 
 
 class Ellipse(object):
