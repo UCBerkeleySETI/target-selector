@@ -238,6 +238,9 @@ class Ellipse(object):
         y = dec - self.dec
         return self.a * x * x + self.b * x * y + self.c * y * y
 
+    def contains(self, ra, dec):
+        return self.evaluate(ra, dec) <= 1
+
     def max_dec_point(self):
         """
         The point with largest dec, on the boundary of the ellipse.
