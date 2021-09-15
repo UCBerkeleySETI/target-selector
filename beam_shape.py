@@ -40,11 +40,7 @@ class BeamShape(object):
         if time is None:
             self.time = datetime.datetime.now()
         elif type(time) is str:
-            self.time = (
-                datetime.datetime.strptime(time, "%Y-%m-%d %H:%M:%S.%f")
-                .replace(tzinfo=datetime.timezone.utc)
-                .astimezone(tz=None)
-            )
+            self.time = datetime.datetime.fromisoformat(time)
         else:
             self.time = time
 
