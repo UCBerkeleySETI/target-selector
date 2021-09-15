@@ -4,6 +4,7 @@ Utilities to do geometry in ra,dec space.
 """
 import math
 import numpy as np
+import scipy.constants as con
 import smallestenclosingcircle
 
 
@@ -34,7 +35,7 @@ class Target(object):
     Otherwise the data is precisely the data provided in redis.
     """
 
-    def __init__(self, index, source_id, ra, dec, priority, dist_c, table_name):
+    def __init__(self, index, source_id, ra, dec, priority, dist_c, table_name, proportional_offset, power_multiplier):
         self.index = index
         self.source_id = source_id
         self.ra = ra
@@ -42,17 +43,21 @@ class Target(object):
         self.priority = priority
         self.dist_c = dist_c
         self.table_name = table_name
+        self.proportional_offset = proportional_offset
+        self.power_multiplier = power_multiplier
 
-        # Targets with a lower priority have a higher score.
         # We are maximizing score of all targets.
+        # The score is a combination of the target priority and its offset from the antenna boresight.
+        # Targets with a lower priority have a higher score.
         # The maximum priority is 7.
         priority_decay = 10
-        self.score = int(priority_decay ** (7 - self.priority))
+        self.score = int(self.power_multiplier * priority_decay ** (7 - self.priority))
 
     def __str__(self):
-        return "target {}, priority {}, at ({:.3f}, {:.3f})".format(
-            self.index, self.priority, self.ra, self.dec
-        )
+        return "Index {}: priority {}, at ({:.3f}, {:.3f})\n" \
+               "Radial offset {}\n" \
+               "Power multiplier {}".format(self.index, self.priority, self.ra,
+                                            self.dec, self.proportional_offset, self.power_multiplier)
 
     @staticmethod
     def parse_targets(targets_dict):
@@ -65,6 +70,8 @@ class Target(object):
         priority
         dist_c
         table_name
+        proportional_offset
+        power_multiplier
         """
         return [
             Target(index, *args)
@@ -76,6 +83,8 @@ class Target(object):
                     targets_dict["priority"],
                     targets_dict["dist_c"],
                     targets_dict["table_name"],
+                    targets_dict["proportional_offset"],
+                    targets_dict["power_multiplier"]
                 )
             )
         ]
@@ -328,6 +337,8 @@ class LinearTransform(object):
             target.priority,
             target.dist_c,
             target.table_name,
+            target.proportional_offset,
+            target.power_multiplier
         )
 
     def transform_beam(self, beam):
