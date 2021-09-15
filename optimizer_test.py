@@ -14,6 +14,12 @@ assert __name__ == "__main__"
 shape = BeamShape(frequency, coordinates, pool_resources, time=time)
 ellipse = shape.inscribe_ellipse()
 
+print(
+    "beam shape: A = {:.3f}, B = {:.3f}, C = {:.3f}".format(
+        ellipse.a, ellipse.b, ellipse.c
+    )
+)
+
 pointing_ra, pointing_dec = map(float, coordinates.split(", "))
 possible_targets = Target.parse_targets(targets, pointing_ra, pointing_dec, frequency)
 
