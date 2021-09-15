@@ -155,6 +155,14 @@ class Circle(Beam):
         assert r < self.radius
         self.ra, self.dec = x, y
 
+    def attenuation(self, target):
+        dist = distance((self.ra, self.dec), (target.ra, target.dec))
+        normalized_dist = dist / self.radius
+        return attenuation(normalized_dist / 2)
+
+    def target_attenuations(self):
+        return [self.attenuation(t) for t in self.targets]
+
     def recenter_optimizing_attenuation(self):
         """
         Find the optimal center based on attenuated score.
@@ -345,6 +353,17 @@ class Ellipse(object):
         return Ellipse(
             center_ra, center_dec, fit.a * scaling, fit.b * scaling, fit.c * scaling
         )
+
+    def attenuations(self, targets):
+        """
+        Calculates the attenuation for each target.
+        """
+        transform = LinearTransform.to_unit_circle(self)
+        center_ra, center_dec = transform.transform_point(self.ra, self.dec)
+        circle = Circle(
+            center_ra, center_dec, 1, [transform.transform_target(t) for t in targets]
+        )
+        return circle.target_attenuations()
 
 
 class LinearTransform(object):

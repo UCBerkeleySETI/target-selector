@@ -30,6 +30,14 @@ beams, targets = optimizer.optimize_ellipses(
     possible_targets=possible_targets, ellipse=ellipse
 )
 
+# Calculate the average attenuation of local beams
+attenuations = []
+for beam in beams:
+    attenuations.extend(
+        ellipse.centered_at(beam.ra, beam.dec).attenuations(beam.targets)
+    )
+print("average local attenuation:", sum(attenuations) / len(attenuations))
+
 # Validate that the beam ellipses contain their targets
 for beam in beams:
     e = ellipse.centered_at(beam.ra, beam.dec)
