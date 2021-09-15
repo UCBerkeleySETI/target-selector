@@ -30,39 +30,32 @@ def distance(point1, point2):
 
 
 class Target(object):
-    """
-    We give each point an index based on its ordinal position in our input.
-    Otherwise the data is precisely the data provided in redis.
-    """
-
-    def __init__(self, index, source_id, ra, dec, priority, dist_c, table_name, proportional_offset, power_multiplier):
+    def __init__(self, index, source_id, ra, dec, dist_c, table_name, priority, score):
+        """
+        We give each point an index based on its ordinal position in our input.
+        score defines our optimization; we look for targets that maximize the
+        sum of their scores.
+        Otherwise the data is precisely the data provided in redis.
+        """
         self.index = index
         self.source_id = source_id
         self.ra = ra
         self.dec = dec
-        self.priority = priority
         self.dist_c = dist_c
         self.table_name = table_name
-        self.proportional_offset = proportional_offset
-        self.power_multiplier = power_multiplier
-
-        # We are maximizing score of all targets.
-        # The score is a combination of the target priority and its offset from the antenna boresight.
-        # Targets with a lower priority have a higher score.
-        # The maximum priority is 7.
-        priority_decay = 10
-        self.score = int(self.power_multiplier * priority_decay ** (7 - self.priority))
+        self.priority = priority
+        self.score = score
 
     def __str__(self):
-        return "Index {}: priority {}, at ({:.3f}, {:.3f})\n" \
-               "Radial offset {}\n" \
-               "Power multiplier {}".format(self.index, self.priority, self.ra,
-                                            self.dec, self.proportional_offset, self.power_multiplier)
+        return "Index {}: score {}, at ({:.3f}, {:.3f})".format(
+            self.index, self.score, self.ra, self.dec
+        )
 
     @staticmethod
-    def parse_targets(targets_dict):
+    def parse_targets(targets_dict, pointing_ra, pointing_dec, frequency):
         """
-        Create a list of Target objects from a dictionary containing keys with a bunch
+        Create a list of Target objects from a serialized form.
+        targets_dict is a dictionary containing keys with a bunch
         of parallel lists:
         source_id
         ra
@@ -70,24 +63,36 @@ class Target(object):
         priority
         dist_c
         table_name
-        proportional_offset
-        power_multiplier
+
+        The other parameters (pointing ra/dec and frequency) are just used for
+        prioritizing each target. Change the numerical logic in this function if
+        you want to change how the targets are prioritized.
         """
-        return [
-            Target(index, *args)
-            for (index, args) in enumerate(
-                zip(
-                    targets_dict["source_id"],
-                    targets_dict["ra"],
-                    targets_dict["decl"],
-                    targets_dict["priority"],
-                    targets_dict["dist_c"],
-                    targets_dict["table_name"],
-                    targets_dict["proportional_offset"],
-                    targets_dict["power_multiplier"]
-                )
+        targets = []
+        for index, (source_id, ra, dec, priority, dist_c, table_name) in enumerate(
+            zip(
+                targets_dict["source_id"],
+                targets_dict["ra"],
+                targets_dict["decl"],
+                targets_dict["priority"],
+                targets_dict["dist_c"],
+                targets_dict["table_name"],
             )
-        ]
+        ):
+            # Attenuation is a linear multiplier on score.
+            radial_offset = distance((ra, dec), (pointing_ra, pointing_dec))
+            beam_width = np.rad2deg((con.c / float(frequency)) / 13.5)
+            proportional_offset = radial_offset / beam_width
+            power_multiplier = attenuation(proportional_offset)
+
+            # Targets with a lower priority have a higher score.
+            # The maximum priority is 7.
+            priority_decay = 10
+            score = int(power_multiplier * priority_decay ** (7 - priority))
+            targets.append(
+                Target(index, source_id, ra, dec, dist_c, table_name, priority, score)
+            )
+        return targets
 
 
 class Beam(object):
@@ -334,11 +339,10 @@ class LinearTransform(object):
             target.source_id,
             new_ra,
             new_dec,
-            target.priority,
             target.dist_c,
             target.table_name,
-            target.proportional_offset,
-            target.power_multiplier
+            target.priority,
+            target.score,
         )
 
     def transform_beam(self, beam):

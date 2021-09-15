@@ -14,23 +14,9 @@ assert __name__ == "__main__"
 shape = BeamShape(frequency, coordinates, pool_resources, time=time)
 ellipse = shape.inscribe_ellipse()
 
-proportional_offset_list = []
-power_multiplier_list = []
-for index in enumerate(targets["source_id"]):
-    pointing_coord = (map(float, coordinates.split(", ")))
-    target_ra = targets["ra"][index[0]]
-    target_dec = targets["decl"][index[0]]
-    target_coord = (target_ra, target_dec)
-    radial_offset = distance(target_coord, pointing_coord)
-    beam_width = np.rad2deg((con.c / float(frequency)) / 13.5)
-    proportional_offset = radial_offset / beam_width
-    power_multiplier = attenuation(proportional_offset)
-    proportional_offset_list.append(proportional_offset)
-    power_multiplier_list.append(power_multiplier)
-targets["proportional_offset"] = proportional_offset_list
-targets["power_multiplier"] = power_multiplier_list
+pointing_ra, pointing_dec = map(float, coordinates.split(", "))
+possible_targets = Target.parse_targets(targets, pointing_ra, pointing_dec, frequency)
 
-possible_targets = Target.parse_targets(targets)
 # Write target list to csv for checking
 with open("sanity_check/fov_total_targets.csv", "w") as f:
     cols = ("ra", "decl")
