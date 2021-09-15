@@ -12,9 +12,6 @@ from optimizer_test_data import time, pool_resources, coordinates, frequency, ta
 assert __name__ == "__main__"
 
 shape = BeamShape(frequency, coordinates, pool_resources, time=time)
-
-print("time:", shape.time)
-
 ellipse = shape.inscribe_ellipse()
 
 print(

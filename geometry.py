@@ -183,24 +183,30 @@ class Circle(Beam):
                 dist = distance(point, (target.ra, target.dec))
                 normalized_dist = dist / self.radius
                 answer += target.score * attenuation(normalized_dist / 2)
-                if normalized_dist > 0.99:
+                if normalized_dist > 0.999:
                     # Add a large penalty
-                    answer -= 100 * (normalized_dist - 0.99) * total_score
+                    answer -= 1000 * (normalized_dist - 0.999) * total_score
             # Make it negative so it's a "loss function"
             return -answer
 
         x0 = np.array([self.ra, self.dec])
         optimal = minimize(loss_function, x0, method="BFGS").x
 
-        self.ra, self.dec = tuple(optimal)
+        new_ra, new_dec = tuple(optimal)
+        for target in self.targets:
+            if distance((new_ra, new_dec), (target.ra, target.dec)) >= self.radius:
+                # The "optimization" would move this target out of the beam.
+                # Just do nothing and exit.
+                return
+
+        self.ra, self.dec = new_ra, new_dec
 
     def recenter(self):
         """
         Recenter the circle, picking an appropriate method.
         """
-        if len(self.targets) <= 2:
-            self.recenter_minimizing_max_distance()
-        else:
+        self.recenter_minimizing_max_distance()
+        if len(self.targets) > 2:
             self.recenter_optimizing_attenuation()
 
 
