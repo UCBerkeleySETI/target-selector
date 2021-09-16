@@ -10,14 +10,14 @@ from scipy.optimize import minimize
 import smallestenclosingcircle
 
 
-def attenuation(x):
+def cosine_attenuation(x):
     """
     The cosine-tapered field function, where x = rho / theta_b.
     See section 2.2.2 in https://iopscience.iop.org/article/10.3847/1538-4357/ab5d2d
 
     Key values:
-    attenuation(0) = 1
-    attenuation(0.5) = 0.5
+    cosine_attenuation(0) = 1
+    cosine_attenuation(0.5) = 0.5
     """
     k = 1.1889647809329454
     numer = math.cos(k * math.pi * x)
@@ -85,7 +85,7 @@ class Target(object):
             radial_offset = distance((ra, dec), (pointing_ra, pointing_dec))
             beam_width = np.rad2deg((con.c / float(frequency)) / 13.5)
             proportional_offset = radial_offset / beam_width
-            power_multiplier = attenuation(proportional_offset)
+            power_multiplier = cosine_attenuation(proportional_offset)
 
             # Targets with a lower priority have a higher score.
             # The maximum priority is 7.
@@ -156,15 +156,7 @@ class Circle(Beam):
         assert r < self.radius
         self.ra, self.dec = x, y
 
-    def attenuation(self, target):
-        dist = distance((self.ra, self.dec), (target.ra, target.dec))
-        normalized_dist = dist / self.radius
-        return attenuation(normalized_dist / 2)
-
-    def target_attenuations(self):
-        return [self.attenuation(t) for t in self.targets]
-
-    def recenter_optimizing_attenuation(self):
+    def recenter_optimizing_attenuation(self, attenuation):
         """
         Find the optimal center based on attenuated score.
         (ra, dec) is an estimate of the optimal center, which we use to speed up our
@@ -205,13 +197,13 @@ class Circle(Beam):
 
         self.ra, self.dec = new_ra, new_dec
 
-    def recenter(self):
+    def recenter(self, attenuation=None):
         """
         Recenter the circle, picking an appropriate method.
         """
         self.recenter_minimizing_max_distance()
-        if len(self.targets) > 2:
-            self.recenter_optimizing_attenuation()
+        if len(self.targets) > 2 and attenuation is not None:
+            self.recenter_optimizing_attenuation(attenuation)
 
 
 class Ellipse(object):
@@ -367,16 +359,21 @@ class Ellipse(object):
             center_ra, center_dec, fit.a * scaling, fit.b * scaling, fit.c * scaling
         )
 
-    def attenuations(self, targets):
+    def fractional_distances(self, targets):
         """
-        Calculates the attenuation for each target.
+        Calculates the fractional distances for each target.
+        Fractional distance is a fraction of the directional width.
+        So it's 0 for the center point, 0.5 for anything on the boundary of the ellipse.
         """
         transform = LinearTransform.to_unit_circle(self)
         center_ra, center_dec = transform.transform_point(self.ra, self.dec)
         circle = Circle(
             center_ra, center_dec, 1, [transform.transform_target(t) for t in targets]
         )
-        return circle.target_attenuations()
+        return [
+            0.5 * distance((center_ra, center_dec), (t.ra, t.dec))
+            for t in circle.targets
+        ]
 
 
 class LinearTransform(object):

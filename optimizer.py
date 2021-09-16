@@ -12,7 +12,7 @@ import pandas as pd
 import scipy.constants as con
 from scipy.spatial import KDTree
 
-from geometry import attenuation, distance, Circle, LinearTransform, Target
+from geometry import Circle, LinearTransform, Target
 
 # One target of priority n is worth priority_decay targets of priority n+1.
 priority_decay = 10
@@ -54,10 +54,11 @@ def intersect_two_circles(x0, y0, r0, x1, y1, r1):
     return ((x3, y3), (x4, y4))
 
 
-def optimize_circles(possible_targets, radius):
+def optimize_circles(possible_targets, radius, attenuation=None):
     """
     Calculate the best-scoring NUM_BEAMS beams assuming each beam is a circle with the given radius.
     possible_targets is a list of Target objects.
+    attenuation is the attenuation function to use for optimizing the beam centers.
 
     This returns (circle_list, target_list) containing the Circle and Target objects
     for the optimal beam placement.
@@ -189,15 +190,16 @@ def optimize_circles(possible_targets, radius):
             selected_targets.append(target)
 
     for c in selected_circles:
-        c.recenter()
+        c.recenter(attenuation=attenuation)
 
     return (selected_circles, selected_targets)
 
 
-def optimize_ellipses(possible_targets, ellipse):
+def optimize_ellipses(possible_targets, ellipse, attenuation=None):
     """
     possible_targets is a list of Target objects.
     ellipse defines the shape of our beam.
+    attenuation is the attenuation function to use for optimizing the beam centers.
 
     Returns a (beam_list, target_list) tuple containing the Beam and Target objects that
     can be observed with the optimal beam placement.
@@ -208,7 +210,7 @@ def optimize_ellipses(possible_targets, ellipse):
 
     # Solve the problem in the transformed space
     circles, selected_targets = optimize_circles(
-        possible_targets=transformed_targets, radius=1
+        transformed_targets, 1, attenuation=attenuation
     )
 
     # Un-transform the answer

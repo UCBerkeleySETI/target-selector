@@ -44,7 +44,14 @@ class BeamShape(object):
         else:
             self.time = time
 
+        self.image = None
+        self.contours = None
+        self.ellipse = None
+
     def create_image(self):
+        if self.image is not None:
+            return self.image
+
         # reference coordinates for MeerKAT (latitude, longitude, altitude?)
         refAnt = (-30.71106, 21.44389, 1035)
         wavelength = con.c / self.freq
@@ -243,23 +250,29 @@ class BeamShape(object):
         image = np.fft.fftshift(fringeSum)
         image = np.fliplr(image)
         image /= np.amax(image)
+        self.image = image
+        return self.image
 
-        return image
+    def pixel_to_ra_dec(self, x, y):
+        pixel_delta = IMAGE_SIZE / 2
+        ra = (y - pixel_delta) / 3600 + self.ra_deg
+        dec = (x - pixel_delta) / 3600 + self.dec_deg
+        return (ra, dec)
 
-    def find_contours(self, image):
+    def find_contours(self):
         """
         Each contour is a list of (ra_deg, dec_deg) tuples.
         We return a list of contours.
         """
-        pixel_contours = measure.find_contours(image, 0.5)
+        if self.contours is not None:
+            return self.contours
+        self.create_image()
+        pixel_contours = measure.find_contours(self.image, 0.5)
         self.contours = []
         for pixel_contour in pixel_contours:
             output_contour = []
             for x, y in pixel_contour:
-                pixel_delta = IMAGE_SIZE / 2
-                ra_deg = (y - pixel_delta) / 3600 + self.ra_deg
-                dec_deg = (x - pixel_delta) / 3600 + self.dec_deg
-                output_contour.append((ra_deg, dec_deg))
+                output_contour.append(self.pixel_to_ra_dec(x, y))
             self.contours.append(output_contour)
         return self.contours
 
@@ -268,11 +281,13 @@ class BeamShape(object):
         Returns an Ellipse that is approximately the same shape as but
         entirely contained by the 0.5 contour.
         """
-        image = self.create_image()
-        contours = self.find_contours(image)
+        if self.ellipse is not None:
+            return self.ellipse
+
+        self.find_contours()
 
         # We assume that the longest contour is the best one to fit an ellipse to.
-        longest_contour = max(contours, key=len)
+        longest_contour = max(self.contours, key=len)
 
         # write the centred contour coordinates to file for checking
         ra_coords = []
@@ -293,7 +308,7 @@ class BeamShape(object):
                 centered = (centered_ra, centered_dec)
                 writer.writerow(centered)
 
-        ellipse = Ellipse.inscribe_with_center(
+        self.ellipse = Ellipse.inscribe_with_center(
             self.ra_deg, self.dec_deg, longest_contour
         )
 
@@ -301,10 +316,39 @@ class BeamShape(object):
             cols = ("ra", "decl")
             writer = csv.writer(f)
             writer.writerow(cols)
-            for point in ellipse.centered_at(0, 0).contour(300):
+            for point in self.ellipse.centered_at(0, 0).contour(300):
                 writer.writerow(point)
 
-        return ellipse
+        return self.ellipse
+
+    def fit_attenuation_function(self):
+        """
+        Constructs an attenuation function based on the fractional distance from the center.
+        Fractional distance changes based on direction; it is 0 at the center and
+        0.5 at the boundary of the ellipse.
+        """
+        self.inscribe_ellipse()
+        t = LinearTransform.to_unit_circle(self.ellipse)
+        center_x, center_y = t.transform_point(self.ra_deg, self.dec_deg)
+
+        # Data we will fit our polynomial to
+        distances = []
+        attenuations = []
+
+        # Use pixels inside the ellipse to fit our attenuation function
+        for x in range(IMAGE_SIZE):
+            for y in range(IMAGE_SIZE):
+                ra, dec = self.pixel_to_ra_dec(x, y)
+                if not self.ellipse.contains(ra, dec):
+                    continue
+                t_x, t_y = t.transform_point(ra, dec)
+                fractional_distance = distance((center_x, center_y), (t_x, t_y)) * 0.5
+                atten = self.image[x][y]
+                distances.append(fractional_distance)
+                attenuations.append(atten)
+
+        poly = np.polynomial.polynomial.Polynomial.fit(distances, attenuations, 6)
+        return poly
 
 
 def get_test_beam_shape():

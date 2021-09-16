@@ -15,3 +15,4 @@ delay/delay_movies
 
 sanity_check
 test_plot.pdf
+debug.py

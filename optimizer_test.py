@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 
-from beam_shape import BeamShape, write_contours
+from beam_shape import BeamShape
 import optimizer
 import csv
 import numpy as np
 import scipy.constants as con
-from geometry import Target, distance, attenuation
+from geometry import Target
 from test_plot import test_plot
 from optimizer_test_data import time, pool_resources, coordinates, frequency, targets
 
@@ -13,6 +13,7 @@ assert __name__ == "__main__"
 
 shape = BeamShape(frequency, coordinates, pool_resources, time=time)
 ellipse = shape.inscribe_ellipse()
+atten = shape.fit_attenuation_function()
 
 print(
     "beam shape: A = {:.3f}, B = {:.3f}, C = {:.3f}".format(
@@ -33,15 +34,16 @@ with open("sanity_check/fov_total_targets.csv", "w") as f:
         writer.writerow(coords)
 
 beams, targets = optimizer.optimize_ellipses(
-    possible_targets=possible_targets, ellipse=ellipse
+    possible_targets, ellipse, attenuation=atten
 )
 
 # Calculate the average attenuation of local beams
-attenuations = []
+distances = []
 for beam in beams:
-    attenuations.extend(
-        ellipse.centered_at(beam.ra, beam.dec).attenuations(beam.targets)
+    distances.extend(
+        ellipse.centered_at(beam.ra, beam.dec).fractional_distances(beam.targets)
     )
+attenuations = [atten(d) for d in distances]
 print("average local attenuation:", sum(attenuations) / len(attenuations))
 
 # Validate that the beam ellipses contain their targets
