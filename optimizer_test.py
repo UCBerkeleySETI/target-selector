@@ -14,11 +14,11 @@ assert __name__ == "__main__"
 shape = BeamShape(frequency, coordinates, pool_resources, time=time)
 ellipse = shape.inscribe_ellipse()
 
-print(
-    "beam shape: A = {:.3f}, B = {:.3f}, C = {:.3f}".format(
-        ellipse.a, ellipse.b, ellipse.c
-    )
-)
+# print(
+#     "Beam shape: A = {:.3f}, B = {:.3f}, C = {:.3f}".format(
+#         ellipse.a, ellipse.b, ellipse.c
+#     )
+# )
 
 pointing_ra, pointing_dec = map(float, coordinates.split(", "))
 possible_targets = Target.parse_targets(targets, pointing_ra, pointing_dec, frequency)
@@ -36,13 +36,24 @@ beams, targets = optimizer.optimize_ellipses(
     possible_targets=possible_targets, ellipse=ellipse
 )
 
-# Calculate the average attenuation of local beams
-attenuations = []
+# Calculate the average attenuation of targets locally within the coherent beams
+attenuations_local = []
 for beam in beams:
-    attenuations.extend(
+    attenuations_local.extend(
         ellipse.centered_at(beam.ra, beam.dec).attenuations(beam.targets)
     )
-print("average local attenuation:", sum(attenuations) / len(attenuations))
+print("Average local attenuation:", sum(attenuations_local) / len(attenuations_local))
+print("Minimum local attenuation:", min(attenuations_local))
+
+# Calculate the average attenuation of coherent beams within the primary beam
+attenuations_primary = []
+for target in targets:
+    attenuations_primary.append(
+        target.power_multiplier
+    )
+print("Average primary attenuation:", sum(attenuations_primary) / len(attenuations_primary))
+print("Minimum primary attenuation:", min(attenuations_primary))
+
 
 # Validate that the beam ellipses contain their targets
 for beam in beams:

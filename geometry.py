@@ -32,7 +32,7 @@ def distance(point1, point2):
 
 
 class Target(object):
-    def __init__(self, index, source_id, ra, dec, dist_c, table_name, priority, score):
+    def __init__(self, index, source_id, ra, dec, dist_c, table_name, priority, power_multiplier, score):
         """
         We give each point an index based on its ordinal position in our input.
         score defines our optimization; we look for targets that maximize the
@@ -46,6 +46,7 @@ class Target(object):
         self.dist_c = dist_c
         self.table_name = table_name
         self.priority = priority
+        self.power_multiplier = power_multiplier
         self.score = score
 
     def __str__(self):
@@ -90,9 +91,9 @@ class Target(object):
             # Targets with a lower priority have a higher score.
             # The maximum priority is 7.
             priority_decay = 10
-            score = int(power_multiplier * priority_decay ** (7 - priority))
+            score = int((power_multiplier ** 1) * priority_decay ** (7 - priority))
             targets.append(
-                Target(index, source_id, ra, dec, dist_c, table_name, priority, score)
+                Target(index, source_id, ra, dec, dist_c, table_name, priority, power_multiplier, score)
             )
         return targets
 
@@ -414,6 +415,7 @@ class LinearTransform(object):
             target.dist_c,
             target.table_name,
             target.priority,
+            target.power_multiplier,
             target.score,
         )
 
