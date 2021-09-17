@@ -32,7 +32,18 @@ def distance(point1, point2):
 
 
 class Target(object):
-    def __init__(self, index, source_id, ra, dec, dist_c, table_name, priority, power_multiplier, score):
+    def __init__(
+        self,
+        index,
+        source_id,
+        ra,
+        dec,
+        dist_c,
+        table_name,
+        priority,
+        power_multiplier,
+        score,
+    ):
         """
         We give each point an index based on its ordinal position in our input.
         score defines our optimization; we look for targets that maximize the
@@ -93,7 +104,17 @@ class Target(object):
             priority_decay = 10
             score = int((power_multiplier ** 1) * priority_decay ** (7 - priority))
             targets.append(
-                Target(index, source_id, ra, dec, dist_c, table_name, priority, power_multiplier, score)
+                Target(
+                    index,
+                    source_id,
+                    ra,
+                    dec,
+                    dist_c,
+                    table_name,
+                    priority,
+                    power_multiplier,
+                    score,
+                )
             )
         return targets
 
@@ -203,7 +224,7 @@ class Circle(Beam):
         Recenter the circle, picking an appropriate method.
         """
         self.recenter_minimizing_max_distance()
-        if len(self.targets) > 2 and attenuation is not None:
+        if len(self.targets) > 1 and attenuation is not None:
             self.recenter_optimizing_attenuation(attenuation)
 
 
