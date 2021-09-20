@@ -267,7 +267,8 @@ class BeamShape(object):
         if self.contours is not None:
             return self.contours
         self.create_image()
-        pixel_contours = measure.find_contours(self.image, 0.5)
+        min_local_attenuation = float(os.getenv("MIN_LOCAL_ATTENUATION") or 0.5)
+        pixel_contours = measure.find_contours(self.image, min_local_attenuation)
         self.contours = []
         for pixel_contour in pixel_contours:
             output_contour = []
@@ -279,7 +280,7 @@ class BeamShape(object):
     def inscribe_ellipse(self):
         """
         Returns an Ellipse that is approximately the same shape as but
-        entirely contained by the 0.5 contour.
+        entirely contained by the min-local-attenuation contour.
         """
         if self.ellipse is not None:
             return self.ellipse
