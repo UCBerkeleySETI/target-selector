@@ -184,9 +184,6 @@ class Circle(Beam):
         (ra, dec) is an estimate of the optimal center, which we use to speed up our
         optimization.
         """
-        if os.getenv("SKIP_OPTIMIZING_ATTENUATION"):
-            return
-
         # For fast optimization, we want our scoring function to be concave.
         # We also want to forbid any center further than radius for one of the targets.
         # So we add a penalty for excessive distance that is enough to make the score

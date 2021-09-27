@@ -3,6 +3,7 @@
 Tools to optimize beam placement.
 """
 
+from beam_shape import BeamShape
 import csv
 import math
 import mip
@@ -17,7 +18,82 @@ from geometry import Circle, LinearTransform, Target
 # One target of priority n is worth priority_decay targets of priority n+1.
 priority_decay = 10
 
-NUM_BEAMS = int(os.getenv("NUM_BEAMS") or 64)
+
+class Optimizer(object):
+    def __init__(
+        self,
+        frequency,
+        coordinates,
+        pool,
+        possible_targets,
+        time=None,
+        num_beams=None,
+        min_local_attenuation=None,
+    ):
+        self.frequency = frequency
+        self.coordinates = coordinates
+        self.pool = pool
+        self.possible_targets = possible_targets
+        self.time = time
+
+        # For each of the following config options, we prioritize:
+        # 1. A setting the caller explicitly set
+        # 2. The value from an environment variable
+        # 3. The default
+        self.num_beams = num_beams or int(os.getenv("NUM_BEAMS") or 64)
+        self.min_local_attenuation = min_local_attenuation or float(
+            os.getenv("MIN_LOCAL_ATTENUATION") or 0.5
+        )
+
+    def optimize(self):
+        """
+        Creates an optimized self.beams and self.targets
+        """
+        self.shape = BeamShape(self.frequency, self.coordinates, self.pool, self.time)
+        self.ellipse, self.attenuation = self.shape.fit_attenuation_function(
+            self.min_local_attenuation
+        )
+        self.beams, self.targets = optimize_ellipses(
+            self.possible_targets,
+            self.ellipse,
+            self.num_beams,
+            attenuation=self.attenuation,
+        )
+
+        # Validate that the beam ellipses contain their targets
+        for beam in self.beams:
+            e = self.ellipse.centered_at(beam.ra, beam.dec)
+            for target in beam.targets:
+                assert e.contains(target.ra, target.dec)
+
+    def show_attenuation_stats(self):
+        assert self.beams, "optimize first"
+        distances = []
+        for beam in self.beams:
+            distances.extend(
+                self.ellipse.centered_at(beam.ra, beam.dec).fractional_distances(
+                    beam.targets
+                )
+            )
+        local_attenuations = [self.attenuation(d) for d in distances]
+
+        print(
+            "Average local attenuation:",
+            sum(local_attenuations) / len(local_attenuations),
+        )
+        print("Minimum local attenuation:", min(local_attenuations))
+
+        # Calculate the average attenuation of coherent beams within the primary beam
+        primary_attenuations = [t.power_multiplier for t in self.targets]
+        print(
+            "Average primary attenuation:",
+            sum(primary_attenuations) / len(primary_attenuations),
+        )
+        print("Minimum primary attenuation:", min(primary_attenuations))
+
+    def write_csvs(self):
+        assert self.beams, "optimize first"
+        write_csvs_helper(self.beams, self.targets)
 
 
 def intersect_two_circles(x0, y0, r0, x1, y1, r1):
@@ -54,9 +130,9 @@ def intersect_two_circles(x0, y0, r0, x1, y1, r1):
     return ((x3, y3), (x4, y4))
 
 
-def optimize_circles(possible_targets, radius, attenuation=None):
+def optimize_circles(possible_targets, radius, num_beams, attenuation=None):
     """
-    Calculate the best-scoring NUM_BEAMS beams assuming each beam is a circle with the given radius.
+    Calculate the best-scoring num_beams beams assuming each beam is a circle with the given radius.
     possible_targets is a list of Target objects.
     attenuation is the attenuation function to use for optimizing the beam centers.
 
@@ -151,8 +227,8 @@ def optimize_circles(possible_targets, radius, attenuation=None):
         model.add_var(name="c{n}", var_type=mip.BINARY) for n in range(len(circles))
     ]
 
-    # Add a constraint that we must select at most NUM_BEAMS circles
-    model += mip.xsum(circle_vars) <= NUM_BEAMS
+    # Add a constraint that we must select at most num_beams circles
+    model += mip.xsum(circle_vars) <= num_beams
 
     # For each target, if its variable is 1 then at least one of its circles must also be 1
     circles_for_target = {}
@@ -195,7 +271,7 @@ def optimize_circles(possible_targets, radius, attenuation=None):
     return (selected_circles, selected_targets)
 
 
-def optimize_ellipses(possible_targets, ellipse, attenuation=None):
+def optimize_ellipses(possible_targets, ellipse, num_beams, attenuation=None):
     """
     possible_targets is a list of Target objects.
     ellipse defines the shape of our beam.
@@ -210,7 +286,7 @@ def optimize_ellipses(possible_targets, ellipse, attenuation=None):
 
     # Solve the problem in the transformed space
     circles, selected_targets = optimize_circles(
-        transformed_targets, 1, attenuation=attenuation
+        transformed_targets, 1, num_beams, attenuation=attenuation
     )
 
     # Un-transform the answer
@@ -220,7 +296,7 @@ def optimize_ellipses(possible_targets, ellipse, attenuation=None):
     return (beams, beam_targets)
 
 
-def write_csvs(selected_beams, selected_targets):
+def write_csvs_helper(selected_beams, selected_targets):
     """
     Write out some csvs to inspect the solution to an optimizer run.
     """

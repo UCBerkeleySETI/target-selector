@@ -45,8 +45,6 @@ class BeamShape(object):
             self.time = time
 
         self.image = None
-        self.contours = None
-        self.ellipse = None
 
     def create_image(self):
         if self.image is not None:
@@ -259,36 +257,34 @@ class BeamShape(object):
         dec = (x - pixel_delta) / 3600 + self.dec_deg
         return (ra, dec)
 
-    def find_contours(self):
+    def find_contours(self, attenuation):
         """
+        Find contours describing curves approximating the provided attenuation.
         Each contour is a list of (ra_deg, dec_deg) tuples.
         We return a list of contours.
         """
-        if self.contours is not None:
-            return self.contours
         self.create_image()
-        min_local_attenuation = float(os.getenv("MIN_LOCAL_ATTENUATION") or 0.5)
-        pixel_contours = measure.find_contours(self.image, min_local_attenuation)
-        self.contours = []
+
+        # min_local_attenuation = float(os.getenv("MIN_LOCAL_ATTENUATION") or 0.5)
+
+        pixel_contours = measure.find_contours(self.image, attenuation)
+        contours = []
         for pixel_contour in pixel_contours:
             output_contour = []
             for x, y in pixel_contour:
                 output_contour.append(self.pixel_to_ra_dec(x, y))
-            self.contours.append(output_contour)
-        return self.contours
+            contours.append(output_contour)
+        return contours
 
-    def inscribe_ellipse(self):
+    def inscribe_ellipse(self, attenuation):
         """
         Returns an Ellipse that is approximately the same shape as but
-        entirely contained by the min-local-attenuation contour.
+        entirely contained by the provided contour.
         """
-        if self.ellipse is not None:
-            return self.ellipse
-
-        self.find_contours()
+        contours = self.find_contours(attenuation)
 
         # We assume that the longest contour is the best one to fit an ellipse to.
-        longest_contour = max(self.contours, key=len)
+        longest_contour = max(contours, key=len)
 
         # write the centred contour coordinates to file for checking
         ra_coords = []
@@ -309,27 +305,30 @@ class BeamShape(object):
                 centered = (centered_ra, centered_dec)
                 writer.writerow(centered)
 
-        self.ellipse = Ellipse.inscribe_with_center(
+        ellipse = Ellipse.inscribe_with_center(
             self.ra_deg, self.dec_deg, longest_contour
         )
 
-        with open("sanity_check/ellipse_vertices.csv", "w") as f:
-            cols = ("ra", "decl")
-            writer = csv.writer(f)
-            writer.writerow(cols)
-            for point in self.ellipse.centered_at(0, 0).contour(300):
-                writer.writerow(point)
+        # with open("sanity_check/ellipse_vertices.csv", "w") as f:
+        #    cols = ("ra", "decl")
+        #    writer = csv.writer(f)
+        #    writer.writerow(cols)
+        #    for point in ellipse.centered_at(0, 0).contour(300):
+        #        writer.writerow(point)
 
-        return self.ellipse
+        return ellipse
 
-    def fit_attenuation_function(self):
+    def fit_attenuation_function(self, min_local_attenuation):
         """
         Constructs an attenuation function based on the fractional distance from the center.
         Fractional distance changes based on direction; it is 0 at the center and
         0.5 at the boundary of the ellipse.
+        It fits attenuations from 1 to min_local_attenuation.
+
+        Returns ellipse, attenuation function.
         """
-        self.inscribe_ellipse()
-        t = LinearTransform.to_unit_circle(self.ellipse)
+        ellipse = self.inscribe_ellipse(min_local_attenuation)
+        t = LinearTransform.to_unit_circle(ellipse)
         center_x, center_y = t.transform_point(self.ra_deg, self.dec_deg)
 
         # Data we will fit our polynomial to
@@ -340,7 +339,7 @@ class BeamShape(object):
         for x in range(IMAGE_SIZE):
             for y in range(IMAGE_SIZE):
                 ra, dec = self.pixel_to_ra_dec(x, y)
-                if not self.ellipse.contains(ra, dec):
+                if not ellipse.contains(ra, dec):
                     continue
                 t_x, t_y = t.transform_point(ra, dec)
                 fractional_distance = distance((center_x, center_y), (t_x, t_y)) * 0.5
@@ -349,7 +348,7 @@ class BeamShape(object):
                 attenuations.append(atten)
 
         poly = np.polynomial.polynomial.Polynomial.fit(distances, attenuations, 6)
-        return poly
+        return ellipse, poly
 
 
 def get_test_beam_shape():
