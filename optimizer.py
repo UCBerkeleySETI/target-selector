@@ -29,6 +29,7 @@ class Optimizer(object):
         time=None,
         num_beams=None,
         min_local_attenuation=None,
+        min_include_attenuation=None,
     ):
         self.frequency = frequency
         self.coordinates = coordinates
@@ -44,6 +45,11 @@ class Optimizer(object):
         self.min_local_attenuation = min_local_attenuation or float(
             os.getenv("MIN_LOCAL_ATTENUATION") or 0.5
         )
+        self.min_include_attenuation = min_include_attenuation
+        if not self.min_include_attenuation:
+            env_min_include_attenuation = os.getenv("MIN_INCLUDE_ATTENUATION")
+            if env_min_include_attenuation:
+                self.min_include_attenuation = float(env_min_include_attenuation)
 
     def optimize(self):
         """
@@ -53,6 +59,7 @@ class Optimizer(object):
         self.ellipse, self.attenuation = self.shape.fit_attenuation_function(
             self.min_local_attenuation
         )
+        # self.main_targets is just the targets that pass min_local_attenuation
         self.beams, self.targets = optimize_ellipses(
             self.possible_targets,
             self.ellipse,
@@ -65,6 +72,32 @@ class Optimizer(object):
             e = self.ellipse.centered_at(beam.ra, beam.dec)
             for target in beam.targets:
                 assert e.contains(target.ra, target.dec)
+
+        # Add extra_targets if min_include_attenuation is set
+        if self.min_include_attenuation:
+            big_ellipse = self.shape.inscribe_ellipse(self.min_include_attenuation)
+            t = LinearTransform.to_unit_circle(big_ellipse)
+            transformed_targets = np.array(
+                [
+                    t.transform_point(target.ra, target.dec)
+                    for target in self.possible_targets
+                ]
+            )
+            transformed_centers = [
+                t.transform_point(beam.ra, beam.dec) for beam in self.beams
+            ]
+
+            tree = KDTree(transformed_centers)
+
+            target_index_matrix = tree.query_ball_point(transformed_targets, 1)
+            for beam, target_indexes in zip(self.beams, target_index_matrix):
+                e = self.ellipse.centered_at(beam.ra, beam.dec)
+                beam.extra_targets = []
+                for i in target_indexes:
+                    target = self.possible_targets[i]
+                    if target not in beam.targets:
+                        assert not e.contains(target.ra, target.dec)
+                        beam.extra_targets.append(target)
 
     def show_attenuation_stats(self):
         assert self.beams, "optimize first"
@@ -90,6 +123,13 @@ class Optimizer(object):
             sum(primary_attenuations) / len(primary_attenuations),
         )
         print("Minimum primary attenuation:", min(primary_attenuations))
+
+        if self.min_include_attenuation:
+            print(
+                "Including",
+                sum(len(beam.extra_targets) for beam in self.beams),
+                "extra targets",
+            )
 
     def write_csvs(self):
         assert self.beams, "optimize first"

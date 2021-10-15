@@ -265,8 +265,6 @@ class BeamShape(object):
         """
         self.create_image()
 
-        # min_local_attenuation = float(os.getenv("MIN_LOCAL_ATTENUATION") or 0.5)
-
         pixel_contours = measure.find_contours(self.image, attenuation)
         contours = []
         for pixel_contour in pixel_contours:
@@ -318,16 +316,16 @@ class BeamShape(object):
 
         return ellipse
 
-    def fit_attenuation_function(self, min_local_attenuation):
+    def fit_attenuation_function(self, min_attenuation):
         """
         Constructs an attenuation function based on the fractional distance from the center.
         Fractional distance changes based on direction; it is 0 at the center and
         0.5 at the boundary of the ellipse.
-        It fits attenuations from 1 to min_local_attenuation.
+        It fits attenuations from 1 to min_attenuation.
 
         Returns ellipse, attenuation function.
         """
-        ellipse = self.inscribe_ellipse(min_local_attenuation)
+        ellipse = self.inscribe_ellipse(min_attenuation)
         t = LinearTransform.to_unit_circle(ellipse)
         center_x, center_y = t.transform_point(self.ra_deg, self.dec_deg)
 
