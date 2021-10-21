@@ -31,6 +31,18 @@ def distance(point1, point2):
     return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
 
+def normalize_ra(pointing_ra, ra):
+    """
+    ra has meaning modulo 360. For example, -180 and 180 are the same ra.
+    To normalize, we want to choose the one that is closest to pointing_ra.
+    """
+    while abs((ra + 360) - pointing_ra) < abs(ra - pointing_ra):
+        ra = ra + 360
+    while abs((ra - 360) - pointing_ra) < abs(ra - pointing_ra):
+        ra = ra - 360
+    return ra
+
+
 class Target(object):
     def __init__(
         self,
@@ -78,9 +90,10 @@ class Target(object):
         dist_c
         table_name
 
-        The other parameters (pointing ra/dec and frequency) are just used for
-        prioritizing each target. Change the numerical logic in this function if
-        you want to change how the targets are prioritized.
+        Pointing ra/dec and frequency are used for prioritizing each target.
+        Change the numerical logic in this function if you want to change how the targets
+        are prioritized.
+        The pointing coordinates are also used to normalize the target ra.
         """
         targets = []
         for index, (source_id, ra, dec, priority, dist_c, table_name) in enumerate(
@@ -93,6 +106,8 @@ class Target(object):
                 targets_dict["table_name"],
             )
         ):
+            ra = normalize_ra(pointing_ra, ra)
+
             # Attenuation is a linear multiplier on score.
             radial_offset = distance((ra, dec), (pointing_ra, pointing_dec))
             beam_width = np.rad2deg((con.c / float(frequency)) / 13.5)
