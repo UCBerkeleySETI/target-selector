@@ -107,6 +107,9 @@ class Optimizer(object):
                     beam.targets
                 )
             )
+
+        logger.info("Centre attenuation: {}".format(self.attenuation(0)))
+
         local_attenuations = [self.attenuation(d) for d in distances]
 
         logger.info("Average local attenuation: {}".format(sum(local_attenuations) / len(local_attenuations)))
