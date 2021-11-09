@@ -10,10 +10,9 @@ import mip
 import numpy as np
 import os
 import pandas as pd
-import scipy.constants as con
 from scipy.spatial import KDTree
-
-from geometry import Circle, LinearTransform, Target
+from geometry import Circle, LinearTransform
+from mk_target_selector.logger import log as logger
 
 # One target of priority n is worth priority_decay targets of priority n+1.
 priority_decay = 10
@@ -110,30 +109,23 @@ class Optimizer(object):
             )
         local_attenuations = [self.attenuation(d) for d in distances]
 
-        print(
-            "Average local attenuation:",
-            sum(local_attenuations) / len(local_attenuations),
-        )
-        print("Minimum local attenuation:", min(local_attenuations))
+        logger.info("Average local attenuation: {}".format(sum(local_attenuations) / len(local_attenuations)))
+        logger.info("Minimum local attenuation: {}".format(min(local_attenuations)))
 
         # Calculate the average attenuation of coherent beams within the primary beam
         primary_attenuations = [t.power_multiplier for t in self.targets]
-        print(
-            "Average primary attenuation:",
-            sum(primary_attenuations) / len(primary_attenuations),
-        )
-        print("Minimum primary attenuation:", min(primary_attenuations))
+        logger.info("Average primary attenuation: {}".format(sum(primary_attenuations) / len(primary_attenuations)))
+        logger.info("Minimum primary attenuation: {}".format(min(primary_attenuations)))
 
         if self.min_include_attenuation:
-            print(
-                "Including",
-                sum(len(beam.extra_targets) for beam in self.beams),
-                "extra targets",
-            )
+            logger.info("Including {} extra targets".format(sum(len(beam.extra_targets) for beam in self.beams)))
 
     def write_csvs(self):
         assert self.beams, "optimize first"
-        write_csvs_helper(self.beams, self.targets)
+        # beams = write_csvs_helper(self.beams, self.targets)[0]
+        # targets = write_csvs_helper(self.beams, self.targets)[1]
+        p = write_csvs_helper(self.beams, self.targets)
+        return p[0], p[1]
 
 
 def intersect_two_circles(x0, y0, r0, x1, y1, r1):
@@ -187,7 +179,7 @@ def optimize_circles(possible_targets, radius, num_beams, attenuation=None):
 
     # Find all pairs of points that could be captured by a single observation
     pairs = tree.query_pairs(2 * radius)
-    print(
+    logger.info(
         "Of {} total remaining targets in the field of view,"
         " {} target pairs can be observed with a single formed beam".format(
             len(possible_targets), len(pairs)
@@ -224,7 +216,7 @@ def optimize_circles(possible_targets, radius, num_beams, attenuation=None):
         except ValueError:
             continue
 
-    print(
+    logger.info(
         "Including targets insufficiently close to any others leaves"
         " {} candidates for beamforming coordinates".format(len(candidate_centers))
     )
@@ -243,7 +235,7 @@ def optimize_circles(possible_targets, radius, num_beams, attenuation=None):
         seen.add(key)
         circles.append(circle)
 
-    print(
+    logger.info(
         "Removing functional duplicates leaves {} remaining candidates".format(
             len(circles)
         )
@@ -289,9 +281,9 @@ def optimize_circles(possible_targets, radius, num_beams, attenuation=None):
     # Optimize
     status = model.optimize(max_seconds=30)
     if status == mip.OptimizationStatus.OPTIMAL:
-        print("Optimal solution found.")
+        logger.info("Optimal solution found.")
     elif status == mip.OptimizationStatus.FEASIBLE:
-        print("Feasible solution found.")
+        logger.info("Feasible solution found.")
     else:
         raise RuntimeError("No solution found during integer programming optimization.")
 
@@ -340,12 +332,12 @@ def write_csvs_helper(selected_beams, selected_targets):
     """
     Write out some csvs to inspect the solution to an optimizer run.
     """
-    print("The solution observes {} unique targets.".format(len(selected_targets)))
+    logger.info("The solution observes {} unique targets.".format(len(selected_targets)))
     pcount = {}
     for t in selected_targets:
         pcount[t.priority] = pcount.get(t.priority, 0) + 1
     for p, count in sorted(pcount.items()):
-        print("{} of the targets have priority {}".format(count, p))
+        logger.info("{} of the targets have priority {}".format(count, p))
     targets_to_observe = []
     beams_to_observe = []
     for beam in selected_beams:
@@ -356,7 +348,7 @@ def write_csvs_helper(selected_beams, selected_targets):
         beams_to_observe.append(
             [beam.ra, beam.dec, target_str, priority_str, dist_str, table_str]
         )
-        # print("Beam ({}, {}) contains targets {}".format(beam.ra, beam.dec, target_str))
+        # logger.info("Beam ({}, {}) contains targets {}".format(beam.ra, beam.dec, target_str))
         for t in beam.targets:
             targets_to_observe.append(
                 [
@@ -421,10 +413,6 @@ def write_csvs_helper(selected_beams, selected_targets):
         for item in shifted_ellipses:
             writer.writerow(item)
 
-    # print(beams_dict)
-    # write_pair_redis(self.redis_server, "{}:current_obs:beamform_beams"
-    #                  .format(product_id), json.dumps(beams_dict))
-
     target_columns = [
         "ra",
         "decl",
@@ -442,6 +430,5 @@ def write_csvs_helper(selected_beams, selected_targets):
     pd.DataFrame.to_csv(
         pd.DataFrame.from_dict(targets_dict), "sanity_check/beamform_targets.csv"
     )
-    # print(targets_dict)
-    # write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets"
-    #                  .format(product_id), json.dumps(targets_dict))
+
+    return beams_dict, targets_dict

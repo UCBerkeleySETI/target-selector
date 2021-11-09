@@ -17,6 +17,7 @@ requires = [
 #    "matplotlib==2.2.5",
     "scipy>=1.4.1",
     "scikit-image>=0.15.0"
+    "pytz>=2021.1"
 ]
 
 setuptools.setup(

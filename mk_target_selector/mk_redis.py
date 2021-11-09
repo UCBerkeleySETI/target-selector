@@ -5,6 +5,7 @@ import time
 import threading
 import math
 import random
+import pytz
 import mip
 import smallestenclosingcircle
 import scipy.constants as con
@@ -16,6 +17,9 @@ from datetime import datetime
 from astropy import units as u
 from astropy.coordinates import Angle, SkyCoord
 from scipy.spatial import KDTree
+from geometry import Target
+from optimizer import Optimizer
+from test_plot import test_plot
 
 try:
     from .logger import log as logger
@@ -54,31 +58,6 @@ class ProcessingStatus(object):
 
 
 pStatus = ProcessingStatus("ready")
-
-
-# One target of priority n is worth priority_decay targets of priority n+1.
-priority_decay = 10
-
-
-class Target(object):
-    """
-    We give each point an index based on its ordinal position in our input.
-    Otherwise the data is precisely the data provided in redis.
-    """
-
-    def __init__(self, index, source_id, ra, decl, priority, dist_c, table_name):
-        self.index = index
-        self.source_id = source_id
-        self.ra = ra
-        self.decl = decl
-        self.priority = priority
-        self.dist_c = dist_c
-        self.table_name = table_name
-
-        # Targets with a lower priority have a higher score.
-        # We are maximizing score of all targets.
-        # The maximum priority is 7.
-        self.score = int(priority_decay ** (7 - self.priority))
 
 
 successfully_processed = []
@@ -170,18 +149,6 @@ class Listen(threading.Thread):
 
         for item in self.p.listen():
             self._message_to_func(item['channel'], self.channel_actions)(item['data'])
-
-            # product_id = self._parse_sensor_name(item['data'])[0]
-            # obs_start_time = self._get_sensor_value(product_id, "current_obs:obs_start_time")
-            # obs_end_time = self._get_sensor_value(product_id, "current_obs:obs_end_time")
-            # if "None" not in str(self._get_sensor_value(product_id, "current_obs:proc_start_time")):
-            # proc_start_time = self._get_sensor_value(product_id, "current_obs:proc_start_time")
-            # time_elapsed = (datetime.now()
-            #                 - datetime.strptime(proc_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
-            # observation_time = (datetime.strptime(obs_end_time, "%Y-%m-%d %H:%M:%S.%f")
-            #                     - datetime.strptime(obs_start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
-
-            # self.abort_criteria(product_id, time_elapsed, observation_time)
 
     def fetch_data(self, product_id, mode):
         """Fetches telescope status data and selects targets when telescope status data is stored
@@ -327,7 +294,7 @@ class Listen(threading.Thread):
                 pulled_coords = self._get_sensor_value(product_id, "current_obs:coords")
                 pulled_freq = self.engine.freq_format(self._get_sensor_value(product_id, "current_obs:frequency"))
 
-                obs_start_time = datetime.now()
+                obs_start_time = datetime.now(pytz.utc)
                 write_pair_redis(self.redis_server,
                                  "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
@@ -378,7 +345,7 @@ class Listen(threading.Thread):
                         sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
                         pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
 
-                        obs_start_time = datetime.now()
+                        obs_start_time = datetime.now(pytz.utc)
                         write_pair_redis(self.redis_server,
                                          "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
@@ -560,9 +527,11 @@ class Listen(threading.Thread):
         # beamform_radec = "circle_{:0.4f}_{:0.4f}".format(ra, decl)
 
         # update observation_status with success message
-        self.engine.update_obs_status(obs_start_time=str(self.round_time
-                                                         (self._get_sensor_value
-                                                          (product_id, "current_obs:obs_start_time"))),
+        # self.engine.update_obs_status(obs_start_time=str(self.round_time
+        #                                                  (self._get_sensor_value
+        #                                                   (product_id, "current_obs:obs_start_time"))),
+        self.engine.update_obs_status(obs_start_time=str(self._get_sensor_value(product_id,
+                                                                                "current_obs:obs_start_time")),
                                       beamform_ra=ra,
                                       beamform_decl=decl,
                                       # beamform_radec=beamform_radec,
@@ -777,25 +746,25 @@ class Listen(threading.Thread):
         if mode == "current_obs":
             pStatus.proc_status = "ready"
 
-    def round_time(self, timestamp):
-        """Function to round timestamp values to nearest second for database matching
-
-        Parameters:
-            timestamp: (datetime)
-                Timestamp to round to the nearest second (for matching success messages against the table of
-                previous observations)
-
-        Returns:
-            rounded: (datetime)
-                Timestamp rounded to the nearest second
-        """
-        dt = str(timestamp)
-        date = dt.split()[0]
-        h, m, s = [dt.split()[1].split(':')[0],
-                   dt.split()[1].split(':')[1],
-                   str(round(float(dt.split()[1].split(':')[-1])))]
-        rounded = "{} {}:{}:{}".format(date, h, m, s)
-        return rounded
+    # def round_time(self, timestamp):
+    #     """Function to round timestamp values to nearest second for database matching
+    #
+    #     Parameters:
+    #         timestamp: (datetime)
+    #             Timestamp to round to the nearest second (for matching success messages against the table of
+    #             previous observations)
+    #
+    #     Returns:
+    #         rounded: (datetime)
+    #             Timestamp rounded to the nearest second
+    #     """
+    #     dt = str(timestamp)
+    #     date = dt.split()[0]
+    #     h, m, s = [dt.split()[1].split(':')[0],
+    #                dt.split()[1].split(':')[1],
+    #                str(round(float(dt.split()[1].split(':')[-1])))]
+    #     rounded = "{} {}:{}:{}".format(date, h, m, s)
+    #     return rounded
 
     def load_schedule_block(self, message):
         """Reformats schedule block messages and reformats them into dictionary format
@@ -906,7 +875,7 @@ class Listen(threading.Thread):
             if (pStatus.proc_status == "ready") or (mode == "next_64"):
                 if mode == "new_sample":
                     try:
-                        obs_end_time = datetime.now()
+                        obs_end_time = datetime.now(pytz.utc)
                         write_pair_redis(self.redis_server,
                                          "{}:current_obs:obs_end_time".format(product_id), str(obs_end_time))
                         pStatus.proc_status = "processing"
@@ -973,7 +942,7 @@ class Listen(threading.Thread):
         """
 
         # calculate list containing the maximum number of targets observable with 64 beams
-        self.beam_number(product_id, targets)
+        self.optimize(product_id, targets)
 
         # fetch list of beamforming coordinates
         beamform_beams = json.loads(self._get_sensor_value(product_id, "current_obs:beamform_beams"))
@@ -1025,8 +994,8 @@ class Listen(threading.Thread):
                 beamform_targets['source_id'].append(source_id)
                 beamform_targets['ra'].append(math.degrees(x))
                 beamform_targets['decl'].append(math.degrees(y))
-                beamform_targets['circle_ra'].append(math.degrees(x))
-                beamform_targets['circle_decl'].append(math.degrees(y))
+                beamform_targets['beam_ra'].append(math.degrees(x))
+                beamform_targets['beam_decl'].append(math.degrees(y))
                 beamform_targets['dist_c'].append(0)
                 beamform_targets['priority'].append(7)
                 beamform_targets['table_name'].append('spare_beams')
@@ -1121,244 +1090,24 @@ class Listen(threading.Thread):
                            'style: {}'.format(message))
             return False
 
-    def beam_number(self, product_id, targets):
-        """Function to calculate the maximum number of targets observable with 64 beams
+    def optimize(self, product_id, targets):
 
-        Thanks to:
-        https://github.com/lacker/targeter
-
-        Parameters:
-            product_id: (str)
-                ASDF
-            targets: (str)
-                ASDF
-
-        Returns:
-            ASDF: (float)
-                ASDF
-        """
-        # observation frequency and beamform radius
-        obs_freq = self._get_sensor_value(product_id, "current_obs:frequency")
-        beam_rad = 0.5 * ((con.c / float(obs_freq)) / 13.5) * 180 / math.pi
-        beamform_rad = 0.5 * ((con.c / float(obs_freq)) / 1000) * 180 / math.pi
-
-        class Circle(object):
-            """
-            A circle along with the set of Targets that is within it.
-            """
-
-            def __init__(self, ra, decl, targets):
-                self.ra = ra
-                self.decl = decl
-                self.targets = targets
-                self.recenter()
-
-            def key(self):
-                """
-                A tuple key encoding the targets list.
-                """
-                return tuple(t.index for t in self.targets)
-
-            def recenter(self):
-                """
-                Alter ra and decl to minimize the maximum distance to any point.
-                """
-                points = [(t.ra, t.decl) for t in self.targets]
-                x, y, r = smallestenclosingcircle.make_circle(points)
-                assert r < beamform_rad
-                self.ra, self.decl = x, y
-
-        # Parse the json into Point objects for convenience
-        points_db = [
-            Target(index, *args)
-            for (index, args) in enumerate(
-                zip(
-                    targets["source_id"],
-                    targets["ra"],
-                    targets["decl"],
-                    targets["priority"],
-                    targets['dist_c'],
-                    targets['table_name']
-                )
-            )
-        ]
-
-        arr = np.array([[p.ra, p.decl] for p in points_db])
-        tree = KDTree(arr)
-
-        # Find all pairs of points that could be captured by a single observation
-        pairs = tree.query_pairs(2 * beamform_rad)
-        logger.info("Of {} total remaining targets in the field of view,"
-                    " {} target pairs can be observed with a single formed beam".format(len(points_db), len(pairs)))
-
-        # A list of (ra, decl) coordinates for the center of possible circles
-        candidate_centers = []
-
-        # Add one center for each of the targets that aren't part of any pairs
-        in_a_pair = set()
-        for i, j in pairs:
-            in_a_pair.add(i)
-            in_a_pair.add(j)
-        for i in range(len(points_db)):
-            if i not in in_a_pair:
-                t = points_db[i]
-                candidate_centers.append((t.ra, t.decl))
-
-        # Add two centers for each pair of targets that are close to each other
-        for i0, i1 in pairs:
-            p0 = points_db[i0]
-            p1 = points_db[i1]
-            # For each pair, find two points that are a bit less than beamform_rad away from each point.
-            # These are the possible centers of the circle.
-            # TODO: make the mathematical argument of this algorithm's sufficiency clearer
-            r = 0.9999 * beamform_rad
-            try:
-                c0, c1 = self.intersect_two_circles(p0.ra, p0.decl, r, p1.ra, p1.decl, r)
-                candidate_centers.append(c0)
-                candidate_centers.append(c1)
-            except ValueError:
-                continue
-
-        logger.info("Including targets insufficiently close to any others leaves"
-                    " {} candidates for beamforming coordinates".format(len(candidate_centers)))
-        candidate_target_indexes = tree.query_ball_point(candidate_centers, beamform_rad)
-
-        # Construct Circle objects.
-        # Filter out any circles whose included targets are the same as a previous circle
-        circles = []
-        seen = set()
-        for (ra, decl), target_indexes in zip(candidate_centers, candidate_target_indexes):
-            targets = [points_db[i] for i in target_indexes]
-            circle = Circle(ra, decl, targets)
-            key = circle.key()
-            if key in seen:
-                continue
-            seen.add(key)
-            circles.append(circle)
-
-        logger.info("Removing functional duplicates leaves {} remaining candidates".format(len(circles)))
-
-        # We want to pick the set of circles that covers the most targets.
-        # This is the "maximum coverage problem".
-        # https://en.wikipedia.org/wiki/Maximum_coverage_problem
-        # We encode this as an integer linear program.
-        model = mip.Model(sense=mip.MAXIMIZE)
-        model.verbose = 0
-
-        # Variable t{n} is whether the nth target is covered
-        target_vars = [
-            model.add_var(name="t{n}", var_type=mip.BINARY) for n in range(len(points_db))
-        ]
-
-        # Variable c{n} is whether the nth circle is selected
-        circle_vars = [
-            model.add_var(name="c{n}", var_type=mip.BINARY) for n in range(len(circles))
-        ]
-
-        # Add a constraint that we must select at most 64 circles
-        model += mip.xsum(circle_vars) <= 64
-
-        # For each target, if its variable is 1 then at least one of its circles must also be 1
-        circles_for_target = {}
-        for (circle_index, circle) in enumerate(circles):
-            for target in circle.targets:
-                if target.index not in circles_for_target:
-                    circles_for_target[target.index] = []
-                circles_for_target[target.index].append(circle_index)
-        for target_index, circle_indexes in circles_for_target.items():
-            cvars = [circle_vars[i] for i in circle_indexes]
-            model += mip.xsum(cvars) >= target_vars[target_index]
-
-        # Maximize the total score for targets we observe
-        model.objective = mip.xsum(
-            t.score * tvar for (t, tvar) in zip(points_db, target_vars)
-        )
-
-        # Optimize
-        status = model.optimize(max_seconds=30)
-        if status == mip.OptimizationStatus.OPTIMAL:
-            logger.info("Optimal solution found")
-        elif status == mip.OptimizationStatus.FEASIBLE:
-            logger.info("Feasible solution found")
-        else:
-            logger.info("No solution found. This is probably a bug")
-            return
-
-        selected_circles = []
-        for circle, circle_var in zip(circles, circle_vars):
-            if circle_var.x > 1e-6:
-                selected_circles.append(circle)
-
-        selected_targets = []
-        for target, target_var in zip(points_db, target_vars):
-            if target_var.x > 1e-6:
-                selected_targets.append(target)
-
-        logger.info("The solution observes {} unique targets".format(len(selected_targets)))
-        pcount = {}
-        for t in selected_targets:
-            pcount[t.priority] = pcount.get(t.priority, 0) + 1
-        for p, count in sorted(pcount.items()):
-            logger.info("{} of the targets have priority {}".format(count, p))
-        targets_to_observe = []
-        circles_to_observe = []
-        for circle in selected_circles:
-            target_str = ", ".join(t.source_id for t in circle.targets)
-            dist_str = ", ".join(str(t.dist_c) for t in circle.targets)
-            priority_str = ", ".join(str(t.priority) for t in circle.targets)
-            table_str = ", ".join(t.table_name for t in circle.targets)
-            circles_to_observe.append([circle.ra, circle.decl, target_str, priority_str, dist_str, table_str])
-            # logger.info("Circle ({}, {}) contains targets {}".format(circle.ra, circle.decl, target_str))
-            for t in circle.targets:
-                targets_to_observe.append([t.ra, t.decl,
-                                           circle.ra, circle.decl,
-                                           t.source_id, t.priority,
-                                           t.dist_c, t.table_name])
-
-        circle_columns = ['ra', 'decl', 'source_id', 'contained_priority', 'contained_dist_c', 'contained_table']
-        circles_dict = {k: [x[i] for x in circles_to_observe] for i, k in enumerate(circle_columns)}
-        pd.DataFrame.to_csv(pd.DataFrame.from_dict(circles_dict), "beamform_beams.csv")
+        obs_time = str(self._get_sensor_value(product_id, "current_obs:obs_start_time"))
+        pool_resources = str(self._get_sensor_value(product_id, "current_obs:pool_resources"))
+        coordinates = str(self._get_sensor_value(product_id, "current_obs:coords"))
+        frequency = str(self._get_sensor_value(product_id, "current_obs:frequency"))
+        pointing_ra, pointing_dec = map(float, coordinates.split(", "))
+        possible_targets = Target.parse_targets(targets, pointing_ra, pointing_dec, frequency)
+        opt = Optimizer(frequency, coordinates, pool_resources, possible_targets, time=obs_time)
+        opt.optimize()
+        opt.show_attenuation_stats()
+        beams, targets = opt.write_csvs()
+        pd.DataFrame.to_csv(pd.DataFrame.from_dict(beams), "beamform_beams.csv")
         write_pair_redis(self.redis_server, "{}:current_obs:beamform_beams"
-                         .format(product_id), json.dumps(circles_dict))
-
-        target_columns = ['ra', 'decl', 'circle_ra', 'circle_decl', 'source_id', 'priority', 'dist_c', 'table_name']
-        targets_dict = {k: [x[i] for x in targets_to_observe] for i, k in enumerate(target_columns)}
-        pd.DataFrame.to_csv(pd.DataFrame.from_dict(targets_dict), "beamform_targets.csv")
+                         .format(product_id), json.dumps(beams))
+        pd.DataFrame.to_csv(pd.DataFrame.from_dict(targets), "beamform_targets.csv")
         write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets"
-                         .format(product_id), json.dumps(targets_dict))
-
-    def intersect_two_circles(self, x0, y0, r0, x1, y1, r1):
-        """
-        Finding the intersections of two circles.
-
-        Thanks to:
-        https://stackoverflow.com/questions/55816902/finding-the-intersection-of-two-circles
-        """
-        # circle 1: (x0, y0), radius r0
-        # circle 2: (x1, y1), radius r1
-
-        d = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
-
-        if d > r0 + r1:
-            raise ValueError("non-intersecting")
-
-        if d < abs(r0 - r1):
-            raise ValueError("one circle within the other")
-
-        if d == 0 and r0 == r1:
-            raise ValueError("coincident circles")
-
-        a = (r0 ** 2 - r1 ** 2 + d ** 2) / (2 * d)
-        h = math.sqrt(r0 ** 2 - a ** 2)
-        x2 = x0 + a * (x1 - x0) / d
-        y2 = y0 + a * (y1 - y0) / d
-        x3 = x2 + h * (y1 - y0) / d
-        y3 = y2 - h * (x1 - x0) / d
-
-        x4 = x2 - h * (y1 - y0) / d
-        y4 = y2 + h * (x1 - x0) / d
-
-        return ((x3, y3), (x4, y4))
+                         .format(product_id), json.dumps(targets))
 
     def _found_aliens(self):
         """You found aliens! Alerting slack

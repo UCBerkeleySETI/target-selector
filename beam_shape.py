@@ -7,6 +7,7 @@ import csv
 import datetime
 from geometry import distance, Ellipse, LinearTransform
 import io
+import pytz
 import math
 import numpy as np
 import os
@@ -53,9 +54,7 @@ class BeamShape(object):
         # reference coordinates for MeerKAT (latitude, longitude, altitude?)
         refAnt = (-30.71106, 21.44389, 1035)
         wavelength = con.c / self.freq
-        J2000RefTime = datetime.datetime(
-            2000, 1, 1, 11, 58, 56, tzinfo=datetime.timezone.utc
-        )
+        J2000RefTime = datetime.datetime(2000, 1, 1, 11, 58, 56, 364576).replace(tzinfo=datetime.timezone.utc)
 
         # ASDF
         gridNum = 100000 * 2

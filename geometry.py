@@ -107,6 +107,7 @@ class Target(object):
         are prioritized.
         The pointing coordinates are also used to normalize the target ra.
         """
+
         targets = []
         for index, (source_id, ra, dec, priority, dist_c, table_name) in enumerate(
             zip(

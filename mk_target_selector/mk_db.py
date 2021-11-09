@@ -179,8 +179,7 @@ class Triage(DatabaseHandler):
                 'primary_decl': primary_decl
              })
 
-        source_tb['duration'] = (datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S.%f")
-                                 - datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S.%f")).total_seconds()
+        source_tb['duration'] = (datetime.fromisoformat(end_time) - datetime.fromisoformat(start_time)).total_seconds()
         source_tb['time'] = start_time
         source_tb['mode'] = mode
         source_tb['file_id'] = file_id
@@ -222,10 +221,11 @@ class Triage(DatabaseHandler):
             None
         """
 
-        if float(str(obs_start_time).split(":", 2)[2]) > 59.5:
-            round_m = float(str(obs_start_time).split(":", 2)[1]) + 1
-            round_s = "00"
-            obs_start_time = "{}:{}:{}".format(str(obs_start_time).split(":", 2)[0], round_m, round_s)
+        # print(str(obs_start_time))
+        # if float(str(obs_start_time).split(":", 2)[2]) > 59.5:
+        #     round_m = float(str(obs_start_time).split(":", 2)[1]) + 1
+        #     round_s = "00"
+        #     obs_start_time = "{}:{}:{}".format(str(obs_start_time).split(":", 2)[0], round_m, round_s)
 
         update = """\
                     UPDATE {table}
@@ -382,6 +382,7 @@ class Triage(DatabaseHandler):
         priority[tb['source_id'].isin(successfully_processed['source_id'])] = 6
 
         # sources previously observed, but at a different frequency
+        # ASDF this gives warning
         prev_freq = successfully_processed.groupby('source_id').agg(lambda x: ', '.join(x.values))
         longest_obs = successfully_processed.groupby('source_id')['duration'].max()
         most_antennas = successfully_processed.groupby('source_id')['n_antennas'].max()
