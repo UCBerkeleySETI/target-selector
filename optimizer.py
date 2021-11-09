@@ -363,6 +363,8 @@ def write_csvs_helper(selected_beams, selected_targets):
                 ]
             )
 
+    print(len(targets_to_observe))
+
     beam_columns = [
         "ra",
         "decl",

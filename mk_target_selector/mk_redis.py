@@ -924,8 +924,8 @@ class Listen(threading.Thread):
         """Reformat the table returned from target searching
 
         Parameters:
-            targets: (pandas.DataFrame)
-                DataFrame containing data for the triaged target list to be processed
+            targets: (dict)
+                dict containing data for the triaged target list to be processed
             product_id: (str)
                 product_id for the given subarray
             sub_arr_id: (int)

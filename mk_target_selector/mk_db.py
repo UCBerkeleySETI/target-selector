@@ -372,8 +372,8 @@ class Triage(DatabaseHandler):
         prev_obs = pd.read_sql(query, con=self.conn)
         # logger.info("Previous observations:\n{}\n".format(prev_obs.drop('antennas', axis=1)))
         # prev_obs.to_csv('prev_obs.csv')
-        successfully_processed \
-            = prev_obs.astype({'source_id': 'str'}).drop('antennas', axis=1).loc[prev_obs['processed'].isin(['1'])]
+        successfully_processed = \
+            prev_obs.astype({'source_id': 'str'}).drop('antennas', axis=1).loc[prev_obs['processed'].isin(['1'])]
 
         # exotica sources
         priority[tb['table_name'].str.contains('exotica')] = 3
@@ -381,14 +381,19 @@ class Triage(DatabaseHandler):
         # sources previously observed & successfully processed
         priority[tb['source_id'].isin(successfully_processed['source_id'])] = 6
 
-        # sources previously observed, but at a different frequency
-        # ASDF this gives warning
-        prev_freq = successfully_processed.groupby('source_id').agg(lambda x: ', '.join(x.values))
+        # sources previously successfully processed with their frequency bands
+        prev_freq = successfully_processed\
+            .drop(['duration', 'n_antennas'], axis=1)\
+            .groupby('source_id')\
+            .agg(lambda x: ', '.join(x.values))
+        # sources previously successfully processed with their maximum durations
         longest_obs = successfully_processed.groupby('source_id')['duration'].max()
+        # sources previously successfully processed with their maximum n_antennas
         most_antennas = successfully_processed.groupby('source_id')['n_antennas'].max()
         current_band = self._freqBand(current_freq)
 
         for p in tb['source_id']:
+            # sources previously observed, but at a different frequency
             try:
                 if current_band in prev_freq.loc[p]['bands']:
                     pass
