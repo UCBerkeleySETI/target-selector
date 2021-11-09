@@ -108,20 +108,21 @@ class Optimizer(object):
                 )
             )
 
-        logger.info("Centre attenuation: {}".format(self.attenuation(0)))
+        print("Timestamp: {}".format(self.time))
+        print("Centre attenuation: {}".format(self.attenuation(0)))
 
         local_attenuations = [self.attenuation(d) for d in distances]
 
-        logger.info("Average local attenuation: {}".format(sum(local_attenuations) / len(local_attenuations)))
-        logger.info("Minimum local attenuation: {}".format(min(local_attenuations)))
+        print("Average local attenuation: {}".format(sum(local_attenuations) / len(local_attenuations)))
+        print("Minimum local attenuation: {}".format(min(local_attenuations)))
 
         # Calculate the average attenuation of coherent beams within the primary beam
         primary_attenuations = [t.power_multiplier for t in self.targets]
-        logger.info("Average primary attenuation: {}".format(sum(primary_attenuations) / len(primary_attenuations)))
-        logger.info("Minimum primary attenuation: {}".format(min(primary_attenuations)))
+        print("Average primary attenuation: {}".format(sum(primary_attenuations) / len(primary_attenuations)))
+        print("Minimum primary attenuation: {}".format(min(primary_attenuations)))
 
         if self.min_include_attenuation:
-            logger.info("Including {} extra targets".format(sum(len(beam.extra_targets) for beam in self.beams)))
+            print("Including {} extra targets".format(sum(len(beam.extra_targets) for beam in self.beams)))
 
     def write_csvs(self):
         assert self.beams, "optimize first"
@@ -366,7 +367,7 @@ def write_csvs_helper(selected_beams, selected_targets):
                 ]
             )
 
-    print(len(targets_to_observe))
+    # print(len(targets_to_observe))
 
     beam_columns = [
         "ra",

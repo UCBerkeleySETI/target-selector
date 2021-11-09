@@ -9,6 +9,7 @@ from geometry import Target
 from optimizer import Optimizer
 from optimizer_test_data import time, pool_resources, coordinates, frequency, targets
 from test_plot import test_plot
+from mk_target_selector.logger import log as logger
 
 assert __name__ == "__main__"
 

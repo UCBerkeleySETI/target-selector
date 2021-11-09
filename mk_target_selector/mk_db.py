@@ -379,7 +379,7 @@ class Triage(DatabaseHandler):
         priority[tb['table_name'].str.contains('exotica')] = 3
 
         # sources previously observed & successfully processed
-        priority[tb['source_id'].isin(successfully_processed['source_id'])] = 6
+        priority[tb['source_id'].isin(successfully_processed['sofurce_id'])] = 6
 
         # sources previously successfully processed with their frequency bands
         prev_freq = successfully_processed\
