@@ -26,9 +26,21 @@ def cosine_attenuation(x):
 
 
 def distance(point1, point2):
+    # Pythagorean distance formula
     x1, y1 = point1
     x2, y2 = point2
     return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+
+
+def great_circle_distance(point1, point2):
+    # Great Circle Distance formula
+    # Input in degrees
+    x1, y1 = point1
+    x2, y2 = point2
+    # Output in degrees
+    return np.rad2deg(math.acos(math.sin(math.radians(y1)) * math.sin(math.radians(y2))
+                                + math.cos(math.radians(y1)) * math.cos(math.radians(y2))
+                                * math.cos(math.fabs(math.radians(x2) - math.radians(x1)))))
 
 
 def normalize_ra(pointing_ra, ra):
@@ -109,7 +121,8 @@ class Target(object):
             ra = normalize_ra(pointing_ra, ra)
 
             # Attenuation is a linear multiplier on score.
-            radial_offset = distance((ra, dec), (pointing_ra, pointing_dec))
+            # ASDF ASDF
+            radial_offset = great_circle_distance((ra, dec), (pointing_ra, pointing_dec))
             beam_width = np.rad2deg((con.c / float(frequency)) / 13.5)
             proportional_offset = radial_offset / beam_width
             power_multiplier = cosine_attenuation(proportional_offset)
