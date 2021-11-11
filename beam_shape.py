@@ -306,12 +306,12 @@ class BeamShape(object):
             self.ra_deg, self.dec_deg, longest_contour
         )
 
-        # with open("sanity_check/ellipse_vertices.csv", "w") as f:
-        #    cols = ("ra", "decl")
-        #    writer = csv.writer(f)
-        #    writer.writerow(cols)
-        #    for point in ellipse.centered_at(0, 0).contour(300):
-        #        writer.writerow(point)
+        with open("sanity_check/ellipse_vertices.csv", "w") as f:
+            cols = ("ra", "decl")
+            writer = csv.writer(f)
+            writer.writerow(cols)
+            for point in ellipse.centered_at(0, 0).contour(300):
+                writer.writerow(point)
 
         return ellipse
 

@@ -22,9 +22,9 @@ requires = [
 
 setuptools.setup(
     name = "meerkat_target_selector",
-    version = "0.0.1",
-    author = "Tyler Cox",
-    author_email = "tyler.a.cox@asu.edu",
+    version = "0.0.2",
+    author = "Bart Wlodarczyk-Sroka, Kevin Lacker, Tyler Cox",
+    author_email = "bart.wlodarczyk-sroka@postgrad.manchester.ac.uk",
     description = ("Breakthrough Listen's MeerKAT Target Selector"),
     license = "MIT",
     keywords = "example documentation tutorial",
