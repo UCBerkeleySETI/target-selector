@@ -10,6 +10,7 @@ import mip
 import numpy as np
 import os
 import pandas as pd
+import target_selector_variables
 from scipy.spatial import KDTree
 from geometry import Circle, LinearTransform
 from mk_target_selector.logger import log as logger
@@ -39,13 +40,15 @@ class Optimizer(object):
         # 3. The default
         self.num_beams = num_beams or int(os.getenv("NUM_BEAMS") or 64)
         self.min_local_attenuation = min_local_attenuation or float(
-            os.getenv("MIN_LOCAL_ATTENUATION") or 0.5
+            target_selector_variables.min_local_attenuation() or 0.5
         )
+        print(self.min_local_attenuation)
         self.min_include_attenuation = min_include_attenuation
         if not self.min_include_attenuation:
-            env_min_include_attenuation = os.getenv("MIN_INCLUDE_ATTENUATION")
+            env_min_include_attenuation = target_selector_variables.min_include_attenuation()
             if env_min_include_attenuation:
                 self.min_include_attenuation = float(env_min_include_attenuation)
+        print(self.min_include_attenuation)
 
     def optimize(self):
         """
@@ -114,7 +117,7 @@ class Optimizer(object):
         logger.info("Minimum local attenuation: {}".format(min(local_attenuations)))
 
         # Calculate the mean attenuation of coherent beams within the primary beam
-        primary_attenuations = [t.power_multiplier for t in self.targets]
+        primary_attenuations = [t.primary_sensitivity for t in self.targets]
         logger.info("Mean primary attenuation: {}".format(sum(primary_attenuations) / len(primary_attenuations)))
         logger.info("Minimum primary attenuation: {}".format(min(primary_attenuations)))
 

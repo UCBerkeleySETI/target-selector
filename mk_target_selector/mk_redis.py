@@ -17,7 +17,8 @@ from datetime import datetime
 from astropy import units as u
 from astropy.coordinates import Angle, SkyCoord
 from scipy.spatial import KDTree
-from geometry import Target, great_circle_distance, cosine_attenuation, priority_decay
+from geometry import Target, great_circle_distance, cosine_attenuation
+from target_selector_variables import priority_decay, primary_sensitivity_exponent
 from optimizer import Optimizer
 from test_plot import test_plot
 
@@ -329,12 +330,14 @@ class Listen(threading.Thread):
                 # number of sources remaining to process
                 n_remaining_obs = len(appended_remaining.index)
 
-                logger.info("Total TBDFM parameter Σ((sensitivity ** 1) * {} ** (7 - priority)) "
+                logger.info("Total TBDFM parameter Σ((sensitivity ** {}) * {} ** (7 - priority)) "
                             "for {} targets in new pointing = {}"
-                            .format(priority_decay(), n_new_obs, tot_new_tbdfm))
-                logger.info("Total TBDFM parameter Σ((sensitivity ** 1) * {} ** (7 - priority)) "
+                            .format(primary_sensitivity_exponent(), priority_decay(),
+                                    n_new_obs, tot_new_tbdfm))
+                logger.info("Total TBDFM parameter Σ((sensitivity ** {}) * {} ** (7 - priority)) "
                             "for {} targets remaining to process = {}"
-                            .format(priority_decay(), n_remaining_obs, tot_remaining_tbdfm))
+                            .format(primary_sensitivity_exponent(), priority_decay(),
+                                    n_remaining_obs, tot_remaining_tbdfm))
 
                 if tot_new_tbdfm > tot_remaining_tbdfm:
                     self.abort_criteria(product_id)
@@ -658,9 +661,10 @@ class Listen(threading.Thread):
             gcd = great_circle_distance(point_1, point_2)
             beam_fwhm = np.rad2deg((con.c / float(frequency)) / 13.5)
             proportional_offset = gcd / beam_fwhm
-            power_multiplier = cosine_attenuation(proportional_offset)
+            primary_sensitivity = cosine_attenuation(proportional_offset)
             # One target of priority n is worth priority_decay targets of priority n+1.
-            tbdfm_param[q] = int((power_multiplier ** 1) * priority_decay() ** (7 - table['priority'][q]))
+            tbdfm_param[q] = int((primary_sensitivity ** primary_sensitivity_exponent())
+                                 * priority_decay() ** (7 - table['priority'][q]))
         # append this array to the target list dataframe
         table['tbdfm_param'] = tbdfm_param
         return table

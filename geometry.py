@@ -7,13 +7,8 @@ import numpy as np
 import os
 import scipy.constants as con
 from scipy.optimize import minimize
+from target_selector_variables import priority_decay, primary_sensitivity_exponent
 import smallestenclosingcircle
-
-
-def priority_decay():
-    # One target of priority n is worth priority_decay targets of priority n+1.
-    priority_decay = 10
-    return priority_decay
 
 
 def cosine_attenuation(x):
@@ -71,7 +66,7 @@ class Target(object):
         dist_c,
         table_name,
         priority,
-        power_multiplier,
+        primary_sensitivity,
         score,
     ):
         """
@@ -87,7 +82,7 @@ class Target(object):
         self.dist_c = dist_c
         self.table_name = table_name
         self.priority = priority
-        self.power_multiplier = power_multiplier
+        self.primary_sensitivity = primary_sensitivity
         self.score = score
 
     def __str__(self):
@@ -132,12 +127,12 @@ class Target(object):
             radial_offset = great_circle_distance((ra, dec), (pointing_ra, pointing_dec))
             beam_width = np.rad2deg((con.c / float(frequency)) / 13.5)
             proportional_offset = radial_offset / beam_width
-            power_multiplier = cosine_attenuation(proportional_offset)
+            primary_sensitivity = cosine_attenuation(proportional_offset)
 
             # Targets with a lower priority have a higher score.
             # The maximum priority is 7.
             # One target of priority n is worth priority_decay targets of priority n+1.
-            score = int((power_multiplier ** 1) * priority_decay() ** (7 - priority))
+            score = int((primary_sensitivity ** primary_sensitivity_exponent()) * priority_decay() ** (7 - priority))
             targets.append(
                 Target(
                     index,
@@ -147,7 +142,7 @@ class Target(object):
                     dist_c,
                     table_name,
                     priority,
-                    power_multiplier,
+                    primary_sensitivity,
                     score,
                 )
             )
@@ -465,7 +460,7 @@ class LinearTransform(object):
             target.dist_c,
             target.table_name,
             target.priority,
-            target.power_multiplier,
+            target.primary_sensitivity,
             target.score,
         )
 
