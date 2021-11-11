@@ -17,7 +17,7 @@ from datetime import datetime
 from astropy import units as u
 from astropy.coordinates import Angle, SkyCoord
 from scipy.spatial import KDTree
-from geometry import Target
+from geometry import Target, great_circle_distance, cosine_attenuation, priority_decay
 from optimizer import Optimizer
 from test_plot import test_plot
 
@@ -308,12 +308,16 @@ class Listen(threading.Thread):
                 # read in and format new target list from redis key to dataframe
                 new_target_list = pd.DataFrame.from_dict(json.loads(
                     self._get_sensor_value(product_id, "new_obs:target_list")))
-                appended_new = self.append_tbdfm(new_target_list)
+                new_coords = self._get_sensor_value(product_id, "new_obs:coords")
+                new_frequency = self._get_sensor_value(product_id, "new_obs:frequency")
+                appended_new = self.append_tbdfm(new_target_list, new_coords, new_frequency)
 
                 # read in and format list of targets which remain to be processed from redis key to dataframe
                 remaining_to_process = pd.DataFrame.from_dict(json.loads(
                     self._get_sensor_value(product_id, "current_obs:remaining_to_process")))
-                appended_remaining = self.append_tbdfm(remaining_to_process)
+                current_coords = self._get_sensor_value(product_id, "current_obs:coords")
+                current_frequency = self._get_sensor_value(product_id, "current_obs:frequency")
+                appended_remaining = self.append_tbdfm(remaining_to_process, current_coords, current_frequency)
 
                 # total TBDFM parameter for sources in the new target list
                 tot_new_tbdfm = appended_new['tbdfm_param'].sum()
@@ -325,10 +329,12 @@ class Listen(threading.Thread):
                 # number of sources remaining to process
                 n_remaining_obs = len(appended_remaining.index)
 
-                logger.info("Total TBDFM parameter Σ(10 ** (7 - priority)) for {} targets in new pointing = {}"
-                            .format(n_new_obs, tot_new_tbdfm))
-                logger.info("Total TBDFM parameter Σ(10 ** (7 - priority)) for {} targets remaining to process = {}"
-                            .format(n_remaining_obs, tot_remaining_tbdfm))
+                logger.info("Total TBDFM parameter Σ((sensitivity ** 1) * {} ** (7 - priority)) "
+                            "for {} targets in new pointing = {}"
+                            .format(priority_decay(), n_new_obs, tot_new_tbdfm))
+                logger.info("Total TBDFM parameter Σ((sensitivity ** 1) * {} ** (7 - priority)) "
+                            "for {} targets remaining to process = {}"
+                            .format(priority_decay(), n_remaining_obs, tot_remaining_tbdfm))
 
                 if tot_new_tbdfm > tot_remaining_tbdfm:
                     self.abort_criteria(product_id)
@@ -625,7 +631,7 @@ class Listen(threading.Thread):
 
     """
 
-    def append_tbdfm(self, table):
+    def append_tbdfm(self, table, coords, frequency):
         """Function to calculate and append TBDFM values to tables containing targets for both the new pointing and
         those currently remaining to process
 
@@ -634,6 +640,10 @@ class Listen(threading.Thread):
         Parameters:
             table: (dataframe)
                 Table from which to calculate TBDFM and to which the values are appended
+            coords: TODO: ADD DESCRIPTION
+                TODO: ADD DESCRIPTION
+            frequency: TODO: ADD DESCRIPTION
+                TODO: ADD DESCRIPTION
         Returns:
             table: (dataframe)
                 Dataframe with appended TBDFM values for each row
@@ -642,7 +652,15 @@ class Listen(threading.Thread):
         tbdfm_param = np.full(table.shape[0], 0, dtype=float)
 
         for q in table.index:
-            tbdfm_param[q] = int(10 ** (7 - table['priority'][q]))
+            # calculate primary beam sensitivity for each target based on cosine attenuation pattern
+            point_1 = table['ra'][q], table['decl'][q]
+            point_2 = float(coords.split(", ")[0]), float(coords.split(", ")[1])
+            gcd = great_circle_distance(point_1, point_2)
+            beam_fwhm = np.rad2deg((con.c / float(frequency)) / 13.5)
+            proportional_offset = gcd / beam_fwhm
+            power_multiplier = cosine_attenuation(proportional_offset)
+            # One target of priority n is worth priority_decay targets of priority n+1.
+            tbdfm_param[q] = int((power_multiplier ** 1) * priority_decay() ** (7 - table['priority'][q]))
         # append this array to the target list dataframe
         table['tbdfm_param'] = tbdfm_param
         return table

@@ -10,6 +10,12 @@ from scipy.optimize import minimize
 import smallestenclosingcircle
 
 
+def priority_decay():
+    # One target of priority n is worth priority_decay targets of priority n+1.
+    priority_decay = 10
+    return priority_decay
+
+
 def cosine_attenuation(x):
     """
     The cosine-tapered field function, where x = rho / theta_b.
@@ -130,8 +136,8 @@ class Target(object):
 
             # Targets with a lower priority have a higher score.
             # The maximum priority is 7.
-            priority_decay = 10
-            score = int((power_multiplier ** 1) * priority_decay ** (7 - priority))
+            # One target of priority n is worth priority_decay targets of priority n+1.
+            score = int((power_multiplier ** 1) * priority_decay() ** (7 - priority))
             targets.append(
                 Target(
                     index,
