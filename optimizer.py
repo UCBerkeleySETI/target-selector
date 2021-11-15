@@ -33,22 +33,32 @@ class Optimizer(object):
         self.pool = pool
         self.possible_targets = possible_targets
         self.time = time
+        # self.time = "2021-11-15 10:23:15.655587+00:00"
 
         # For each of the following config options, we prioritize:
         # 1. A setting the caller explicitly set
         # 2. The value from an environment variable
         # 3. The default
-        self.num_beams = num_beams or int(os.getenv("NUM_BEAMS") or 64)
+        self.num_beams = num_beams or int(target_selector_variables.number_beams() or 64)
         self.min_local_attenuation = min_local_attenuation or float(
             target_selector_variables.min_local_attenuation() or 0.5
         )
-        print(self.min_local_attenuation)
         self.min_include_attenuation = min_include_attenuation
         if not self.min_include_attenuation:
             env_min_include_attenuation = target_selector_variables.min_include_attenuation()
             if env_min_include_attenuation:
                 self.min_include_attenuation = float(env_min_include_attenuation)
-        print(self.min_include_attenuation)
+        # self.min_include_attenuation = min_include_attenuation or float(
+        #     target_selector_variables.min_include_attenuation() or 0.5
+        # )
+
+        with open("sanity_check/fov_total_targets.csv", "w") as f:
+            cols = ("source_id", "ra", "decl")
+            writer = csv.writer(f)
+            writer.writerow(cols)
+            for item in self.possible_targets:
+                target_row = (item.source_id, item.ra, item.dec)
+                writer.writerow(target_row)
 
     def optimize(self):
         """
