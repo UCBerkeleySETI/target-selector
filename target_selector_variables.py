@@ -12,8 +12,8 @@ def min_local_attenuation():
 
 def min_include_attenuation():
     # The minimum coherent beam attenuation required for a target to be marked as observed
-    # min_attenuation = 0.5
-    # return min_attenuation
+    # test_attenuation = 0.5
+    # return test_attenuation
     pass
 
 

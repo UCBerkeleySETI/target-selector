@@ -6,17 +6,12 @@ import threading
 import math
 import random
 import pytz
-import mip
-import smallestenclosingcircle
 import scipy.constants as con
 import pandas as pd
 import numpy as np
 from io import StringIO
 from functools import reduce
 from datetime import datetime
-from astropy import units as u
-from astropy.coordinates import Angle, SkyCoord
-from scipy.spatial import KDTree
 from geometry import Target, great_circle_distance, cosine_attenuation
 from target_selector_variables import priority_decay, primary_sensitivity_exponent
 from optimizer import Optimizer
@@ -437,47 +432,61 @@ class Listen(threading.Thread):
 
         else:
             logger.info("Target coordinate message received: {}".format(message))
-            coords = SkyCoord(' '.join(value.split(', ')[-2:]), unit=(u.hourangle, u.deg))
+            coords_ra_hms, coords_dec_dms = value.split(', ')[-2:]
+            coords_ra_h = int(coords_ra_hms.split(':')[0])
+            coords_ra_m = int(coords_ra_hms.split(':')[-2])
+            coords_ra_s = float(coords_ra_hms.split(':')[-1])
+            coords_dec_d = int(coords_dec_dms.split(':')[0])
+            coords_dec_m = int(coords_dec_dms.split(':')[-2])
+            coords_dec_s = float(coords_dec_dms.split(':')[-1])
+
+            coords_ra_deg = float(15 * (coords_ra_h + (coords_ra_m / 60) + (coords_ra_s / 3600)))
+            if coords_dec_d < 0:
+                coords_dec_deg = float(coords_dec_d - (coords_dec_m / 60) - (coords_dec_s / 3600))
+            else:
+                coords_dec_deg = float(coords_dec_d + (coords_dec_m / 60) + (coords_dec_s / 3600))
+
+            # coords = SkyCoord(' '.join(value.split(', ')[-2:]), unit=(u.hourangle, u.deg))
             coord_key = "{}:new_obs:coords".format(product_id)
-            coord_value = "{}, {}".format(coords.ra.deg, coords.dec.deg)
+            coord_value = "{}, {}".format(coords_ra_deg, coords_dec_deg)
             write_pair_redis(self.redis_server, coord_key, coord_value)
             # logger.info("Wrote [{}] to [{}]".format(coord_value, coord_key))
 
-    def _schedule_blocks(self, key, target_pointing, beam_rad):
-        """Block that responds to schedule block updates. Searches for targets
-           and publishes the information to the processing channel
-
-       Parameters:
-            key: (dict)
-                Redis channel message received from listening to a channel
-
-        Returns:
-            None
-        """
-
-        message = get_redis_key(self.redis_server, key)
-        product_id = key.split(':')[0]
-        schedule_block = self.load_schedule_block(message)
-
-        if isinstance(schedule_block, list):
-            if isinstance(schedule_block[0], list):
-                target_pointing = schedule_block[0]
-            elif isinstance(schedule_block[0], dict):
-                target_pointing = schedule_block
-
-        if isinstance(schedule_block, dict):
-            target_pointing = schedule_block['targets']
-
-        start = time.time()
-        for i, t in enumerate(target_pointing):
-            targets = self.engine.select_targets(*self.pointing_coords(t),
-                                                 beam_rad,
-                                                 current_freq=self._get_sensor_value(product_id,
-                                                                                     "current_obs:frequency"))
-            self._publish_targets(targets, product_id=product_id, sub_arr_id=i)
-
-        logger.info('{} pointings processed in {} seconds'.format(len(target_pointing),
-                                                                  time.time() - start))
+    # def _schedule_blocks(self, key, target_pointing, beam_rad):
+    #     """Block that responds to schedule block updates. Searches for targets
+    #        and publishes the information to the processing channel
+    #
+    #    Parameters:
+    #         key: (dict)
+    #             Redis channel message received from listening to a channel
+    #
+    #     Returns:
+    #         None
+    #     """
+    #
+    #     message = get_redis_key(self.redis_server, key)
+    #     product_id = key.split(':')[0]
+    #     schedule_block = self.load_schedule_block(message)
+    #
+    #     if isinstance(schedule_block, list):
+    #         if isinstance(schedule_block[0], list):
+    #             target_pointing = schedule_block[0]
+    #         elif isinstance(schedule_block[0], dict):
+    #             target_pointing = schedule_block
+    #
+    #     if isinstance(schedule_block, dict):
+    #         target_pointing = schedule_block['targets']
+    #
+    #     start = time.time()
+    #     for i, t in enumerate(target_pointing):
+    #         targets = self.engine.select_targets(*self.pointing_coords(t),
+    #                                              beam_rad,
+    #                                              current_freq=self._get_sensor_value(product_id,
+    #                                                                                  "current_obs:frequency"))
+    #         self._publish_targets(targets, product_id=product_id, sub_arr_id=i)
+    #
+    #     logger.info('{} pointings processed in {} seconds'.format(len(target_pointing),
+    #                                                               time.time() - start))
 
     def _pool_resources(self, message):
         """Response to a pool_resources message from the sensor_alerts channel.
@@ -753,7 +762,7 @@ class Listen(threading.Thread):
         arr_ra_dec = coords.split(', ')
         dec_coord = arr_ra_dec[1]
         formatted_freq = self.engine.freq_format(frequency)
-        if float(dec_coord) > 45:  # coordinates out of MeerKAT's range
+        if float(dec_coord) > 45:  # coordinates out of MeerKAT's range TODO: UPDATE TO ACTUAL VALUE
             logger.info('Selected coordinates ({}) unavailable. Waiting for new coordinates'
                         .format(coords))
         else:  # no sources from target list in beam
@@ -1057,22 +1066,22 @@ class Listen(threading.Thread):
 
         publish(self.redis_server, channel, key)
 
-    def pointing_coords(self, t_str):
-        """Function used to clean up run loop and parse pointing information
-
-        Parameters:
-            t_str: (dict)
-                schedule block telescope pointing information
-
-        Returns:
-            c_ra, c_dec: (float)
-                pointing coordinates of the telescope
-        """
-
-        pointing = t_str['target'].split(', ')
-        c_ra = Angle(pointing[-2], unit=u.hourangle).rad
-        c_dec = Angle(pointing[-1], unit=u.deg).rad
-        return c_ra, c_dec
+    # def pointing_coords(self, t_str):
+    #     """Function used to clean up run loop and parse pointing information
+    #
+    #     Parameters:
+    #         t_str: (dict)
+    #             schedule block telescope pointing information
+    #
+    #     Returns:
+    #         c_ra, c_dec: (float)
+    #             pointing coordinates of the telescope
+    #     """
+    #
+    #     pointing = t_str['target'].split(', ')
+    #     c_ra = Angle(pointing[-2], unit=u.hourangle).rad
+    #     c_dec = Angle(pointing[-1], unit=u.deg).rad
+    #     return c_ra, c_dec
 
     def _parse_sensor_name(self, message):
         """Parse channel name sent over redis channel
