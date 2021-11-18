@@ -432,23 +432,10 @@ class Listen(threading.Thread):
 
         else:
             logger.info("Target coordinate message received: {}".format(message))
-            coords_ra_hms, coords_dec_dms = value.split(', ')[-2:]
-            coords_ra_h = int(coords_ra_hms.split(':')[0])
-            coords_ra_m = int(coords_ra_hms.split(':')[-2])
-            coords_ra_s = float(coords_ra_hms.split(':')[-1])
-            coords_dec_d = int(coords_dec_dms.split(':')[0])
-            coords_dec_m = int(coords_dec_dms.split(':')[-2])
-            coords_dec_s = float(coords_dec_dms.split(':')[-1])
-
-            coords_ra_deg = float(15 * (coords_ra_h + (coords_ra_m / 60) + (coords_ra_s / 3600)))
-            if coords_dec_d < 0:
-                coords_dec_deg = float(coords_dec_d - (coords_dec_m / 60) - (coords_dec_s / 3600))
-            else:
-                coords_dec_deg = float(coords_dec_d + (coords_dec_m / 60) + (coords_dec_s / 3600))
-
             # coords = SkyCoord(' '.join(value.split(', ')[-2:]), unit=(u.hourangle, u.deg))
             coord_key = "{}:new_obs:coords".format(product_id)
-            coord_value = "{}, {}".format(coords_ra_deg, coords_dec_deg)
+            coord_value = "{}, {}".format(self.hms_dms_decimal_convert(value)[0],
+                                          self.hms_dms_decimal_convert(value)[-1])
             write_pair_redis(self.redis_server, coord_key, coord_value)
             # logger.info("Wrote [{}] to [{}]".format(coord_value, coord_key))
 
@@ -642,6 +629,40 @@ class Listen(threading.Thread):
     Internal Methods
 
     """
+
+    def hms_dms_decimal_convert(self, coords):
+        """Converts H:M:S, D:M:S RA/Dec values to decimal for processing
+
+        Parameters:
+            coords: (str)
+                Coordinate string
+
+        Returns:
+            coords_ra_deg, coords_dec_deg: (float, float)
+                Tuple of RA/Dec coordinates in decimal format
+        """
+
+        coords_ra_hms, coords_dec_dms = coords.split(', ')[-2:]
+        coords_ra_h = int(coords_ra_hms.split(':')[0])
+        coords_ra_m = int(coords_ra_hms.split(':')[-2])
+        coords_ra_s = float(coords_ra_hms.split(':')[-1])
+        coords_dec_d = int(coords_dec_dms.split(':')[0])
+        coords_dec_m = int(coords_dec_dms.split(':')[-2])
+        coords_dec_s = float(coords_dec_dms.split(':')[-1])
+
+        if coords_ra_h < 0:
+            coords_ra_deg = float(15 * (coords_ra_h - (coords_ra_m / 60) - (coords_ra_s / 3600)))
+        else:
+            coords_ra_deg = float(15 * (coords_ra_h + (coords_ra_m / 60) + (coords_ra_s / 3600)))
+        if coords_dec_d < 0:
+            coords_dec_deg = float(coords_dec_d - (coords_dec_m / 60) - (coords_dec_s / 3600))
+        else:
+            coords_dec_deg = float(coords_dec_d + (coords_dec_m / 60) + (coords_dec_s / 3600))
+
+        if coords_ra_deg < 0:
+            coords_ra_deg = 360 + coords_ra_deg
+
+        return coords_ra_deg, coords_dec_deg
 
     def append_tbdfm(self, table, coords, frequency):
         """Function to calculate and append TBDFM values to tables containing targets for both the new pointing and
