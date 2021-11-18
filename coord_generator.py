@@ -108,8 +108,8 @@ with open('random_seed.csv') as f:
                 if final_messages[i+4].endswith('True'):
                     print(chnls[i], final_messages[i])
                     r.publish(chnls[i], final_messages[i])
-                    print("Observing for 30 seconds...")
-                    time.sleep(30)
+                    print("Observing for 15 seconds...")
+                    time.sleep(15)
                 # try:
                 #     key_glob_remaining = '*:*:remaining_to_process'
                 #     for j in r.scan_iter(key_glob_remaining):
@@ -123,7 +123,7 @@ with open('random_seed.csv') as f:
                 #     pass
             elif final_messages[i+1].startswith('deconfigure'):
                 try:
-                    key_glob = '*:*:processing_64'
+                    key_glob = '*:*:processing_beams'
                     for k in r.scan_iter(key_glob):
                         time.sleep(0.05)
                         product_id = (str(k)[1:].replace("\'", "")).split(':')[0]

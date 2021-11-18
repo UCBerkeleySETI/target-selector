@@ -38,7 +38,6 @@ class DatabaseHandler(object):
             None
         """
         self.cfg = self.configure_settings(config_file)
-        # self.priority_sources = np.array(self.cfg['priority_sources'])
         self.conn = self.connect_to_db(self.cfg['mysql'])
 
     def configure_settings(self, config_file):

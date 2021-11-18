@@ -13,7 +13,7 @@ from io import StringIO
 from functools import reduce
 from datetime import datetime
 from geometry import Target, great_circle_distance, cosine_attenuation
-from target_selector_variables import priority_decay, primary_sensitivity_exponent
+from target_selector_variables import priority_decay, primary_sensitivity_exponent, number_beams
 from optimizer import Optimizer
 from test_plot import test_plot
 
@@ -153,61 +153,80 @@ class Listen(threading.Thread):
             product_id: (str)
                 Product ID parsed from redis message
             mode: (str)
-                Mode in which function is to be run; "current_obs" fetches the data and writes it to current_obs redis
-                keys, while "new_obs" fetches the data for comparison against the currently processing block, without
-                overwriting keys relating to the currently processing observations
+                Mode in which function is to be run; "recalculating" is used to update parameters for the currently
+                processing sample, "current_obs" fetches the data and writes it to current_obs redis keys, while
+                "new_obs" fetches the data for comparison against the currently processing block, without overwriting
+                 keys relating to the currently processing observations
         Returns:
             None
         """
-        if ("None" not in str(self._get_sensor_value(product_id, "new_obs:coords")))\
-                and ("None" not in str(self._get_sensor_value(product_id, "new_obs:frequency")))\
-                and ("None" not in str(self._get_sensor_value(product_id, "new_obs:pool_resources"))):
-            try:
-                # create redis key-val pairs to store current observation data & current telescope status data
-                new_coords = self._get_sensor_value(product_id, "new_obs:coords")
-                coords_ra = float(new_coords.split(", ")[0])
-                coords_dec = float(new_coords.split(", ")[1])
-                new_freq = self._get_sensor_value(product_id, "new_obs:frequency")
-                new_pool = self._get_sensor_value(product_id, "new_obs:pool_resources")
+        if mode == "recalculating":
+            # mode = recalculating: used to update priority values for the currently processing sample
+            current_coords = self._get_sensor_value(product_id, "current_obs:coords")
+            coords_ra = float(current_coords.split(", ")[0])
+            coords_dec = float(current_coords.split(", ")[1])
+            current_freq = self._get_sensor_value(product_id, "current_obs:frequency")
+            targets = self \
+                .engine.select_targets(np.deg2rad(coords_ra),
+                                       np.deg2rad(coords_dec),
+                                       current_freq=current_freq,
+                                       beam_rad=self._beam_radius(current_freq))
+            columns = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
+            targ_dict = targets.loc[:, columns].to_dict('list')
+            write_pair_redis(self.redis_server, "{}:current_obs:target_list"
+                             .format(product_id), json.dumps(targ_dict))
+        else:
+            # mode = new_obs: fetches data for comparison against currently processing block
+            # mode = current_obs: fetches data and writes it to current_obs redis keys
+            if ("None" not in str(self._get_sensor_value(product_id, "new_obs:coords")))\
+                    and ("None" not in str(self._get_sensor_value(product_id, "new_obs:frequency")))\
+                    and ("None" not in str(self._get_sensor_value(product_id, "new_obs:pool_resources"))):
+                try:
+                    # create redis key-val pairs to store current observation data & current telescope status data
+                    new_coords = self._get_sensor_value(product_id, "new_obs:coords")
+                    coords_ra = float(new_coords.split(", ")[0])
+                    coords_dec = float(new_coords.split(", ")[1])
+                    new_freq = self._get_sensor_value(product_id, "new_obs:frequency")
+                    new_pool = self._get_sensor_value(product_id, "new_obs:pool_resources")
 
-                if mode == "current_obs":
-                    # logger.info("Writing values of [{}:new_obs:*] to [{}:current_obs:*]"
-                    #             .format(product_id, product_id))
-                    write_pair_redis(self.redis_server, "{}:{}:coords".format(product_id, mode), new_coords)
-                    # logger.info("Fetched [{}:{}:coords]: [{}]"
-                    #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:coords"
-                    #                                                              .format(mode))))
-                    write_pair_redis(self.redis_server, "{}:{}:frequency".format(product_id, mode), new_freq)
-                    # logger.info("Fetched [{}:{}:frequency]: [{}]"
-                    #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:frequency"
-                    #                                                              .format(mode))))
-                    write_pair_redis(self.redis_server, "{}:{}:pool_resources".format(product_id, mode), new_pool)
-                    # logger.info("Fetched [{}:{}:pool_resources]: [{}]"
-                    #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources"
-                    #                                                              .format(mode))))
+                    if mode == "current_obs":
+                        # logger.info("Writing values of [{}:new_obs:*] to [{}:current_obs:*]"
+                        #             .format(product_id, product_id))
+                        write_pair_redis(self.redis_server, "{}:{}:coords".format(product_id, mode), new_coords)
+                        # logger.info("Fetched [{}:{}:coords]: [{}]"
+                        #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:coords"
+                        #                                                              .format(mode))))
+                        write_pair_redis(self.redis_server, "{}:{}:frequency".format(product_id, mode), new_freq)
+                        # logger.info("Fetched [{}:{}:frequency]: [{}]"
+                        #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:frequency"
+                        #                                                              .format(mode))))
+                        write_pair_redis(self.redis_server, "{}:{}:pool_resources".format(product_id, mode), new_pool)
+                        # logger.info("Fetched [{}:{}:pool_resources]: [{}]"
+                        #             .format(product_id, mode, self._get_sensor_value(product_id, "{}:pool_resources"
+                        #                                                              .format(mode))))
 
-                targets = self\
-                    .engine.select_targets(np.deg2rad(coords_ra),
-                                           np.deg2rad(coords_dec),
-                                           current_freq=self._get_sensor_value(product_id, "{}:frequency".format(mode)),
-                                           beam_rad=self._beam_radius(self._get_sensor_value(product_id,
-                                                                                             "{}:frequency"
-                                                                                             .format(mode))))
+                    targets = self\
+                        .engine.select_targets(np.deg2rad(coords_ra),
+                                               np.deg2rad(coords_dec),
+                                               current_freq=self._get_sensor_value(product_id, "{}:frequency".format(mode)),
+                                               beam_rad=self._beam_radius(self._get_sensor_value(product_id,
+                                                                                                 "{}:frequency"
+                                                                                                 .format(mode))))
 
-                columns = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
-                targ_dict = targets.loc[:, columns].to_dict('list')
+                    columns = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
+                    targ_dict = targets.loc[:, columns].to_dict('list')
 
-                if len(targets.index) == 0:
-                    self.coord_error(coords=self._get_sensor_value(product_id, "{}:coords".format(mode)),
-                                     frequency=self._get_sensor_value(product_id, "{}:frequency".format(mode)),
-                                     mode=mode,
-                                     product_id=product_id)
-                else:
-                    write_pair_redis(self.redis_server, "{}:{}:target_list"
-                                     .format(product_id, mode), json.dumps(targ_dict))
+                    if len(targets.index) == 0:
+                        self.coord_error(coords=self._get_sensor_value(product_id, "{}:coords".format(mode)),
+                                         frequency=self._get_sensor_value(product_id, "{}:frequency".format(mode)),
+                                         mode=mode,
+                                         product_id=product_id)
+                    else:
+                        write_pair_redis(self.redis_server, "{}:{}:target_list"
+                                         .format(product_id, mode), json.dumps(targ_dict))
 
-            except KeyError:
-                pass
+                except KeyError:
+                    pass
 
     """
 
@@ -309,32 +328,32 @@ class Listen(threading.Thread):
                 appended_new = self.append_tbdfm(new_target_list, new_coords, new_frequency)
 
                 # read in and format list of targets which remain to be processed from redis key to dataframe
-                remaining_to_process = pd.DataFrame.from_dict(json.loads(
-                    self._get_sensor_value(product_id, "current_obs:remaining_to_process")))
+                current_target_list = pd.DataFrame.from_dict(json.loads(
+                    self._get_sensor_value(product_id, "current_obs:target_list")))
                 current_coords = self._get_sensor_value(product_id, "current_obs:coords")
                 current_frequency = self._get_sensor_value(product_id, "current_obs:frequency")
-                appended_remaining = self.append_tbdfm(remaining_to_process, current_coords, current_frequency)
+                appended_current = self.append_tbdfm(current_target_list, current_coords, current_frequency)
 
                 # total TBDFM parameter for sources in the new target list
                 tot_new_tbdfm = appended_new['tbdfm_param'].sum()
                 # number of sources in the new target list
                 n_new_obs = len(appended_new.index)
 
-                # total TBDFM parameter for sources remaining to process
-                tot_remaining_tbdfm = appended_remaining['tbdfm_param'].sum()
-                # number of sources remaining to process
-                n_remaining_obs = len(appended_remaining.index)
+                # total TBDFM parameter for sources currently processing
+                tot_current_tbdfm = appended_current['tbdfm_param'].sum()
+                # number of sources currently processing
+                n_current_obs = len(appended_current.index)
 
                 logger.info("Total TBDFM parameter Σ((sensitivity ** {}) * {} ** (7 - priority)) "
                             "for {} targets in new pointing = {}"
                             .format(primary_sensitivity_exponent(), priority_decay(),
                                     n_new_obs, tot_new_tbdfm))
                 logger.info("Total TBDFM parameter Σ((sensitivity ** {}) * {} ** (7 - priority)) "
-                            "for {} targets remaining to process = {}"
+                            "for {} targets in current pointing = {}"
                             .format(primary_sensitivity_exponent(), priority_decay(),
-                                    n_remaining_obs, tot_remaining_tbdfm))
+                                    n_current_obs, tot_current_tbdfm))
 
-                if tot_new_tbdfm > tot_remaining_tbdfm:
+                if tot_new_tbdfm > tot_current_tbdfm:
                     self.abort_criteria(product_id)
                     write_pair_redis(self.redis_server, "{}:current_obs:coords".format(product_id),
                                      self._get_sensor_value(product_id, "new_obs:coords"))
@@ -355,7 +374,7 @@ class Listen(threading.Thread):
 
                         self._publish_targets(pulled_targets, product_id, sub_arr_id)
 
-                elif tot_new_tbdfm <= tot_remaining_tbdfm:
+                elif tot_new_tbdfm <= tot_current_tbdfm:
                     logger.info("New pointing does not contain sources with a higher total TBDFM "
                                 "parameter. Abort criteria not met. Continuing")
                     pass
@@ -530,67 +549,37 @@ class Listen(threading.Thread):
         product_id = message.split(':')[0]
         ra = "{:0.4f}".format(float(message.split("_")[2]))
         decl = "{:0.4f}".format(float(message.split("_")[3]))
-        # beamform_radec = "circle_{:0.4f}_{:0.4f}".format(ra, decl)
 
-        # update observation_status with success message
-        # self.engine.update_obs_status(obs_start_time=str(self.round_time
-        #                                                  (self._get_sensor_value
-        #                                                   (product_id, "current_obs:obs_start_time"))),
         self.engine.update_obs_status(obs_start_time=str(self._get_sensor_value(product_id,
                                                                                 "current_obs:obs_start_time")),
                                       beamform_ra=ra,
                                       beamform_decl=decl,
-                                      # beamform_radec=beamform_radec,
                                       processed='TRUE')
 
-        remaining_64 = json.loads(self._get_sensor_value(product_id, "current_obs:processing_64"))
-        remaining_all = json.loads(self._get_sensor_value(product_id, "current_obs:remaining_to_process"))
+        processing_beams = json.loads(self._get_sensor_value(product_id, "current_obs:processing_beams"))
 
-        # REMOVE INDEX FROM LISTS UNDER ALL KEYS
-        # rounded_ra = [round(num, 4) for num in remaining_64['ra']]
-        # if ra in rounded_ra:
-        #     idx_ra = rounded_ra.index(ra)
-
-        remaining_str = ["{:0.4f}".format(float(item)) for item in remaining_64['ra']]
-        if ra in remaining_str:
-            idx_ra = remaining_str.index(ra)
-            for m in remaining_64['source_id'][idx_ra].split(", "):
-                if m in remaining_all['source_id']:
-                    idx_to_rm_all = remaining_all['source_id'].index(m)
-                    keys_all = ['ra', 'decl', 'source_id', 'dist_c', 'table_name', 'priority']
-                    for i in keys_all:
-                        to_rm = remaining_all.get(i)
-                        del to_rm[idx_to_rm_all]
+        matching_ra = ["{:0.4f}".format(float(item)) for item in processing_beams['ra']]
+        if ra in matching_ra:
+            idx_ra = matching_ra.index(ra)
             keys_64 = ['ra', 'decl', 'source_id', 'contained_dist_c', 'contained_table', 'contained_priority']
             for j in keys_64:
-                to_rm = remaining_64.get(j)
+                to_rm = processing_beams.get(j)
                 del to_rm[idx_ra]
         else:
-            logger.info("Was not able to remove successfully processed target {}, {} "
-                        "from list of targets remaining to process".format(ra, decl))
+            logger.info("Was not able to remove successfully processed beamforming coordinates {}, {} "
+                        "from list of beams to process".format(ra, decl))
 
         write_pair_redis(
             self.redis_server,
-            "{}:current_obs:remaining_to_process".format(product_id), json.dumps(remaining_all))
-        write_pair_redis(
-            self.redis_server,
-            "{}:current_obs:processing_64".format(product_id), json.dumps(remaining_64))
+            "{}:current_obs:processing_beams".format(product_id), json.dumps(processing_beams))
 
-        if not len(remaining_all['source_id']):
-            logger.info("Successful processing of all remaining beamforming targets confirmed by processing nodes")
-            self._deconfigure(product_id)
-            pStatus.proc_status = "ready"
-            logger.info(
-                "-------------------------------------------------------------------------------------------------")
-            logger.info("Processing state set to \'ready\'")
-
-        elif not len(remaining_64['ra']):
-            logger.info("Successful processing of 64 beamforming targets confirmed by processing nodes. "
+        if not len(processing_beams['ra']):
+            logger.info("Successful processing of 64 beamforming coordinates confirmed by processing nodes. "
                         "Calculating next 64")
-            self._publish_targets(remaining_all, product_id)
+            self.fetch_data(product_id, mode="recalculating")
+            self._publish_targets(json.loads(self._get_sensor_value(product_id, "current_obs:target_list")),
+                                  product_id)
             self.store_metadata(product_id, mode="next_64")
-
-        # self.abort_criteria(product_id, time_elapsed, fraction_processed)
 
     def _acknowledge(self, message):
         """Response to a successful acknowledgement message from the sensor_alerts channel.
@@ -608,22 +597,24 @@ class Listen(threading.Thread):
         ra = message.split("_")[2]
         decl = message.split("_")[3]
 
-        remaining_64 = pd.DataFrame.from_dict(
-            json.loads(self._get_sensor_value(product_id, "current_obs:unacknowledged_64")))\
+        unacknowledged_beams = pd.DataFrame.from_dict(
+            json.loads(self._get_sensor_value(product_id, "current_obs:unacknowledged_beams")))\
             .astype({'ra': float, 'decl': float})
 
         format_mapping = {'ra': '{:0.4f}', 'decl': '{:0.4f}'}
         for key, value in format_mapping.items():
-            remaining_64[key] = remaining_64[key].apply(value.format)
+            unacknowledged_beams[key] = unacknowledged_beams[key].apply(value.format)
 
-        remaining_64 = remaining_64.loc[~((remaining_64['ra'] == ra) | (remaining_64['decl'] == decl))]\
+        unacknowledged_beams = unacknowledged_beams.loc[~((unacknowledged_beams['ra'] == ra) |
+                                                          (unacknowledged_beams['decl'] == decl))]\
             .reset_index(drop=True).to_dict(orient="list")
-        write_pair_redis(self.redis_server, "{}:current_obs:unacknowledged_64".format(product_id),
-                         json.dumps(remaining_64))
+        write_pair_redis(self.redis_server, "{}:current_obs:unacknowledged_beams".format(product_id),
+                         json.dumps(unacknowledged_beams))
 
-        if not len(remaining_64['ra']):
-            # 64 target coordinates have been received by the processing nodes
-            logger.info("Receipt of next 64 beamforming coordinates confirmed by processing nodes")
+        if not len(unacknowledged_beams['ra']):
+            # All target coordinates have been received by the processing nodes
+            logger.info("Receipt of next {} beamforming coordinates confirmed by processing nodes"
+                        .format(number_beams()))
 
     """
 
@@ -666,8 +657,7 @@ class Listen(threading.Thread):
         return coords_ra_deg, coords_dec_deg
 
     def append_tbdfm(self, table, coords, frequency):
-        """Function to calculate and append TBDFM values to tables containing targets for both the new pointing and
-        those currently remaining to process
+        """Function to calculate and append TBDFM values to tables containing targets
 
         TBDFM = To Be Determined Figure of Merit
 
@@ -951,7 +941,7 @@ class Listen(threading.Thread):
 
                 # TODO: Change this to handle specific pointing in subarray
                 targets = pd.DataFrame.from_dict(
-                    json.loads(self._get_sensor_value(product_id, "current_obs:processing_64")))
+                    json.loads(self._get_sensor_value(product_id, "current_obs:processing_beams")))
 
                 coords = self._get_sensor_value(product_id, "current_obs:coords")
                 self.engine.add_sources_to_db(targets, coords, start, end, proxies, antennas, n_antennas, file_id, bands)
@@ -1012,8 +1002,8 @@ class Listen(threading.Thread):
         init_targets = len(beamform_targets['source_id'])
         init_unique = len(set(beamform_targets['source_id']))
 
-        n_spare = 64 - init_coords
-        # if all targets can be observed with fewer than 64 beams,
+        n_spare = number_beams() - init_coords
+        # if all targets can be observed with fewer than the maximum number of beams,
         if n_spare >= 1:
             # fetch current observation coordinates
             coords = self._get_sensor_value(product_id, "current_obs:coords")
@@ -1054,17 +1044,13 @@ class Listen(threading.Thread):
                 beamform_targets['table_name'].append('spare_beams')
 
         key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
-        key_all_remaining = '{}:current_obs:remaining_to_process'.format(product_id)
-        key_64_remaining = '{}:current_obs:processing_64'.format(product_id)
-        key_64_unacknowledged = '{}:current_obs:unacknowledged_64'.format(product_id)
+        key_beams_processing = '{}:current_obs:processing_beams'.format(product_id)
+        key_beams_unacknowledged = '{}:current_obs:unacknowledged_beams'.format(product_id)
         channel = "bluse:///set"
         # write tables to redis
         write_pair_redis(self.redis_server, key, json.dumps(targets))
-        write_pair_redis(self.redis_server, key_64_remaining, json.dumps(beamform_beams))
-        write_pair_redis(self.redis_server, key_64_unacknowledged, json.dumps(beamform_beams))
-        # # rename columns in beamform_targets table
-        # beamform_targets['ra'] = beamform_targets.pop('circle_ra')
-        # beamform_targets['decl'] = beamform_targets.pop('circle_decl')
+        write_pair_redis(self.redis_server, key_beams_processing, json.dumps(beamform_beams))
+        write_pair_redis(self.redis_server, key_beams_unacknowledged, json.dumps(beamform_beams))
 
         pd.DataFrame.to_csv(pd.DataFrame.from_dict(targets), "targets.csv")
 
@@ -1075,7 +1061,6 @@ class Listen(threading.Thread):
                         .format(init_coords,
                                 init_unique, len(targets.get('source_id')), init_targets, n_spare, channel))
             # write tables to redis
-            write_pair_redis(self.redis_server, key_all_remaining, json.dumps(beamform_targets))
             write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id),
                              json.dumps(beamform_targets))
         elif n_spare < 1:
@@ -1083,27 +1068,7 @@ class Listen(threading.Thread):
             logger.info('{} beamforming coordinates containing {} of {} unique targets ({} total) published to {}'
                         .format(init_coords,
                                 init_unique, len(targets.get('source_id')), init_targets, channel))
-            # write tables to redis
-            write_pair_redis(self.redis_server, key_all_remaining, json.dumps(targets))
-
         publish(self.redis_server, channel, key)
-
-    # def pointing_coords(self, t_str):
-    #     """Function used to clean up run loop and parse pointing information
-    #
-    #     Parameters:
-    #         t_str: (dict)
-    #             schedule block telescope pointing information
-    #
-    #     Returns:
-    #         c_ra, c_dec: (float)
-    #             pointing coordinates of the telescope
-    #     """
-    #
-    #     pointing = t_str['target'].split(', ')
-    #     c_ra = Angle(pointing[-2], unit=u.hourangle).rad
-    #     c_dec = Angle(pointing[-1], unit=u.deg).rad
-    #     return c_ra, c_dec
 
     def _parse_sensor_name(self, message):
         """Parse channel name sent over redis channel

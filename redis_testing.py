@@ -48,7 +48,7 @@ for i in range(len(msgs)-1):
             time.sleep(20)
     elif msgs[i+1].startswith('deconfigure'):
         try:
-            key_glob = '*:*:processing_64'
+            key_glob = '*:*:processing_beams'
             for k in r.scan_iter(key_glob):
                 time.sleep(0.05)
                 product_id = (str(k)[1:].replace("\'", "")).split(':')[0]
