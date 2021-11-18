@@ -434,8 +434,9 @@ class Listen(threading.Thread):
             logger.info("Target coordinate message received: {}".format(message))
             # coords = SkyCoord(' '.join(value.split(', ')[-2:]), unit=(u.hourangle, u.deg))
             coord_key = "{}:new_obs:coords".format(product_id)
-            coord_value = "{}, {}".format(self.hms_dms_decimal_convert(value)[0],
-                                          self.hms_dms_decimal_convert(value)[-1])
+            coord_string = value.split(', ', 1)[1]
+            coord_value = "{}, {}".format(self.hms_dms_decimal_convert(coord_string)[0],
+                                          self.hms_dms_decimal_convert(coord_string)[-1])
             write_pair_redis(self.redis_server, coord_key, coord_value)
             # logger.info("Wrote [{}] to [{}]".format(coord_value, coord_key))
 
@@ -642,7 +643,7 @@ class Listen(threading.Thread):
                 Tuple of RA/Dec coordinates in decimal format
         """
 
-        coords_ra_hms, coords_dec_dms = coords.split(', ')[-2:]
+        coords_ra_hms, coords_dec_dms = coords.split(', ')
         coords_ra_h = int(coords_ra_hms.split(':')[0])
         coords_ra_m = int(coords_ra_hms.split(':')[-2])
         coords_ra_s = float(coords_ra_hms.split(':')[-1])
