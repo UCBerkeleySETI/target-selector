@@ -13,9 +13,10 @@ import numpy as np
 import os
 import re
 import scipy.constants as con
-
 from skimage import measure
 from mk_target_selector.redis_tools import get_redis_key, connect_to_redis
+from backports.datetime_fromisoformat import MonkeyPatch
+MonkeyPatch.patch_fromisoformat()
 
 # The image size to use for creating images for contours
 IMAGE_SIZE = 200

@@ -12,18 +12,19 @@ requires = [
     "python_dateutil>=2.8.0",
     "PyYAML>=5.1.2",
     "mysqlclient>=1.4.4",
-    "logger>=1.4",
+    "logger==1.4",
     "mip>=1.13.0",
     # "matplotlib==2.2.5",
     "scipy>=1.4.1",
-    "scikit-image>=0.15.0"
-    "pytz>=2021.1"
+    "scikit-image>=0.15.0",
+    "pytz>=2021.1",
+    "backports-datetime-fromisoformat>=1.0.0"
 ]
 
 setuptools.setup(
     name = "meerkat_target_selector",
     version = "0.0.2",
-    author = "Bart Wlodarczyk-Sroka, Kevin Lacker, Tyler Cox",
+    author = "Bart Wlodarczyk-Sroka, Kevin Lacker, Daniel Czech, Tyler Cox",
     author_email = "bart.wlodarczyk-sroka@postgrad.manchester.ac.uk",
     description = ("Breakthrough Listen's MeerKAT Target Selector"),
     license = "MIT",

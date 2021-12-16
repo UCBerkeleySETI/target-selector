@@ -24,8 +24,6 @@ from argparse import (
 
 # link to 26m star table
 data_link = '/Users/Bart/Downloads/master_gaia_database.csv'
-# https://www.dropbox.com/s/hxk6pxqdw1gyp3h/1_million_sample_complete.csv?dl=1 # 1m table
-# https://www.dropbox.com/s/maod2e0v5w9nogt/master_gaia_database.csv?dl=1 # 26m table
 
 # link to ad-hoc table 
 data_link_adhoc = '/Users/Bart/Downloads/adhoc.csv'
