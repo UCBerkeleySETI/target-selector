@@ -18,7 +18,7 @@ requires = [
     "scipy>=1.4.1",
     "scikit-image>=0.15.0",
     "pytz>=2021.1",
-    "backports-datetime-fromisoformat>=1.0.0"
+    "backports-datetime-fromisoformat==1.0.0"
 ]
 
 setuptools.setup(

@@ -5,7 +5,6 @@ import sys
 import time
 import logging
 from mk_target_selector.logger import log, set_logger
-from astropy.config import reload_config, get_config_dir
 from mk_target_selector.target_selector import Target_Selector
 
 def start(config):
