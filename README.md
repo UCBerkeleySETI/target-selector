@@ -59,7 +59,9 @@ python target_selector_start.py
                         |___/
 ```
 
-MeerKAT status update messages are published on Redis over the `alerts` and `sensor_alerts` channels. The target selector subscribes to these channels, receiving messages in real-time and sending them to various functions to be acted upon depending on their contents. Relevant data (including the pointing coordinates, observation centre frequency and resource pool) is written to Redis key-value pairs. Upon commencement of observation, pointing coordinate and frequency data is retrieved and used to calculate a list of visible targets; these are queried from MySQL tables containing a sample of 26 million Gaia DR2 sources [2], in addition to smaller samples of exotica [3] and ad-hoc sources. The resulting list of visible targets is compared with another MySQL table containing metadata of previously completed observations, and ordered according to a chosen set of priority criteria. The final triaged list of targets is then sent to the processing nodes. Redis messages received from the backend concerning processing of submitted sources are in turn used to update the table of previous observations, until processing of all the published sources is either successful or aborted.
+MeerKAT status update messages are published on Redis over the `alerts` and `sensor_alerts` channels. The target selector subscribes to these channels, receiving messages in real-time and sending them to various functions to be acted upon depending on their contents. Relevant data (including the pointing coordinates, observation centre frequency and resource pool) is written to Redis key-value pairs. Upon commencement of observation, pointing coordinate and frequency data is retrieved and used to calculate a list of visible targets; these are queried from MySQL tables containing a sample of 26 million Gaia DR2 sources [2], in addition to smaller samples of exotica [3] and ad-hoc sources. The resulting list of visible targets is compared with another MySQL table containing metadata of previously completed observations, and ordered according to a chosen set of priority criteria. 
+
+Taking into account the individual antennas used for a given observation and their respective weightings, along with the time of day at which the observations were performed, the interferometric point spread function (PSF) is simulated to give an approximate shape and size for the synthesized coherent beams, 64 of which can be formed on the field of view simultaneously with current capabilities. Optimisation of the positioning of these 64 beams allows for the targeting of several sources simultaneously with any given beam; parameters set the behaviour of the optimisation to achieve a balance between total number of targeted sources and the sensitivity at which sources are targeted. The final list of target coordinates is then sent to the processing nodes. Redis messages received from the backend concerning processing of submitted sources are in turn used to update the table of previous observations, until processing of all the published sources is either successful or aborted.
 
 ![](processing_state.png)
 
@@ -194,26 +196,66 @@ targets_table = pd.DataFrame.to_csv(targets)
 write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id), targets_table)
 ```
 
-The current timestamp is written to the Redis key `product_id:current_obs:obs_start_time` (indicating the observation start time), the target list is published to `bluse:///set`, and the target selector state is set to `processing`. 
+The current timestamp is written to the Redis key `product_id:current_obs:obs_start_time` (indicating the observation start time) and the list of triaged visible source coordinates is sent to the optimizer. 
 
 ```
-    pulled_targets = StringIO(self._get_sensor_value(product_id, "current_obs:target_list"))
-    pulled_coords = self._get_sensor_value(product_id, "current_obs:coords")
-    pulled_freq = self.engine.freq_format(self._get_sensor_value(product_id, "current_obs:frequency"))
-    targets_to_publish = pd.read_csv(pulled_targets, sep=",", index_col=0)
+    pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
     [...]
     obs_start_time = datetime.now()
     write_pair_redis(self.redis_server, "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
-    [...]
     self._publish_targets(targets_to_publish, product_id, sub_arr_id)
-
-def _publish_targets(self, targets, product_id, channel, columns, sub_arr_id, sensor_name='targets'):
-    [...]
-    write_pair_redis(self.redis_server, key, json.dumps(targ_dict))
-    publish(self.redis_server, channel, key)
-    [...]
-    pStatus.proc_status = "processing"
 ```
+```
+def _publish_targets(self, targets, product_id, channel, columns=None, sub_arr_id=0, sensor_name='targets'):
+    [...]
+    self.optimize(product_id, targets)
+```
+
+The optimizer calculates the optimal positioning for the 64 coherent beams.
+
+The size and shape of the coherent beam sensitivity response is dependent on the individual antennas used for a given observation, as well as the projection of antenna baselines on the sky in the pointing direction at the time of the observation. The sensitivity gradient is estimated by simulating the beam point spread function (PSF). The resulting beam is often irregular in shape; for ease of calculation, the beams were subsequently estimated by taking contours of the PSF and constructing the largest possible ellipses contained entirely within them [# TODO: CITE MOSAIC STUFF, MAYBE INCLUDE IMAGES].
+
+A coordinate transformation is applied to the field of view such that the elliptical coherent beams become circular. It follows that any two sources separated by a distance of less than 2r in the transformed coordinate frame can be targeted by a single coherent beam; the set of all these intersection points, along with the coordinates for any sources insufficiently close to any others, allows for the solution of the 'maximum coverage problem' - picking the set of circles to cover the largest possible number of targets. This can be further combined with knowledge of the coherent beam sensitivity gradient from the PSF, to select for higher-quality observations. The coordinate frame is then transformed back, and the target and beam coordinates (in their original frame) are written to Redis key-value pairs.
+
+```
+def optimize(self, product_id, targets)
+    [...]
+    obs_time = str(self._get_sensor_value(product_id, "current_obs:obs_start_time"))
+    pool_resources = str(self._get_sensor_value(product_id, "current_obs:pool_resources"))
+    coordinates = str(self._get_sensor_value(product_id, "current_obs:coords"))
+    frequency = str(self._get_sensor_value(product_id, "current_obs:frequency"))
+    pointing_ra, pointing_dec = map(float, coordinates.split(", "))
+    possible_targets = Target.parse_targets(targets, pointing_ra, pointing_dec, frequency)
+    opt = Optimizer(frequency, coordinates, pool_resources, possible_targets, time=obs_time)
+    opt.optimize()
+    [...]
+    write_pair_redis(self.redis_server, "{}:current_obs:beamform_beams".format(product_id), json.dumps(beams))
+    [...]
+    write_pair_redis(self.redis_server, "{}:current_obs:beamform_targets".format(product_id), json.dumps(targets))
+```
+
+The list of beam coordinates is written to Redis key-value pairs for beams remaining to be acknowledged by the processing nodes and subsequently processed. The list of targeted sources is published to `bluse:///set`.
+
+```
+    [...]
+    beamform_beams = json.loads(self._get_sensor_value(product_id, "current_obs:beamform_beams"))
+    [...]
+    beamform_targets = json.loads(self._get_sensor_value(product_id, "current_obs:beamform_targets"))
+    [...]
+    key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
+    key_beams_processing = '{}:current_obs:processing_beams'.format(product_id)
+    key_beams_unacknowledged = '{}:current_obs:unacknowledged_beams'.format(product_id)
+    channel = "bluse:///set"
+    [...]
+    write_pair_redis(self.redis_server, key, json.dumps(targets))
+    write_pair_redis(self.redis_server, key_beams_processing, json.dumps(beamform_beams))
+    write_pair_redis(self.redis_server, key_beams_unacknowledged, json.dumps(beamform_beams))
+    [...]
+    publish(self.redis_server, channel, key)
+```
+
+# TODO: UPDATE BELOW CODE SNIPPET
+
 ```
 [2021-04-07 13:13:44,718 - INFO - mk_redis.py:292] Targets to publish for 51.76745833333333, -33.92397222222222 at 10.0 GHz:
 
@@ -243,29 +285,11 @@ def _publish_targets(self, targets, product_id, channel, columns, sub_arr_id, se
 22     22  51.6996 -33.9263  5053249480121796736  Fornax  1903.850  26m_sources         2
 
 [2021-04-07 13:13:44,720 - INFO - mk_redis.py:775] Targets published to bluse:///set
-[2021-04-07 13:13:44,720 - INFO - mk_redis.py:777] Processing state set to 'processing'
-```
-
-While the target selector is in the `processing` state, the `[...]:new_obs:[...]` Redis keys are continually updated with incoming status messages, while the `[...]:current_obs:[...]` Redis keys remain the same until confirmation is received from the processing nodes that processing of the current block has either been aborted or concluded successfully.
-
-If a `capture-start` message is received while the previously published target list is still being processed by the back-end (and consequently the target selector is in the `processing` state), the function calculates a target list from the data contained under the `product_id:new_obs:*` Redis keys, without overwriting the `product_id:current_obs:*` keys. The target list for the new pointing is then compared with the remaining unprocessed sources from the current sample. If the new pointing contains a greater total number of sources (`n_remaining < n_new_list`) with a lower median distance (`r_med_new_list < r_med_remaining`) than the remaining unprocessed sources from the current sample, processing is aborted and the new target list is published and sent to the processing nodes.
-
-```
-def _capture_start(self, message):
-    [...]
-    if pStatus.proc_status == "processing":
-        self.fetch_data(product_id, mode="new_obs")
-        [...]
-            if (n_remaining < n_new_list) and (r_med_new_list < r_med_remaining):
-                self.abort_criteria(product_id, n_remaining, n_new_list, r_med_remaining, r_med_new_list)
-                self.fetch_data(product_id, mode="current_obs")
-                [...]
-                self._publish_targets(targets_to_publish, product_id, sub_arr_id)
 ```
 
 #### `alerts` -> `capture-stop:product_id`
 
-Upon receipt of such a message, if there are targets stored under the Redis key `product_id:current_obs:target_list` and the observation end time is not already stored, the current timestamp is written to the Redis key `product_id:current_obs:obs_end_time`.
+Upon receipt of such a message, a function is called to store the observation metadata in the corresponding MySQL table.
 
 ```
 [2021-04-07 13:14:00,966 - INFO - mk_redis.py:309] Capture stop message received: array_1
@@ -273,52 +297,84 @@ Upon receipt of such a message, if there are targets stored under the Redis key 
 ```
 def _capture_stop(self, message):
     [...] 
-    if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list"))\
-            and "None" in str(self._get_sensor_value(product_id, "current_obs:obs_end_time")):
-        [...]
-        obs_end_time = datetime.now()
-        write_pair_redis(self.redis_server, "{}:current_obs:obs_end_time".format(product_id), str(obs_end_time))
-        self.store_metadata(product_id)
+    self.store_metadata(product_id, mode="new_sample")
 ```
 
-Values containing data on the antennas and proxies in use (`product_id:current_obs:pool_resources`), the start time  (`product_id:current_obs:obs_start_time`) and end time (`product_id:current_obs:obs_end_time`) of observation, the list of targets (`product_id:current_obs:target_list`) and the frequency of observation (`product_id:current_obs:frequency`) are pulled from their respective Redis keys, and used to update the table of previous observations.
+If there are targets stored under the Redis key `product_id:current_obs:target_list` and the observation end time is not already stored, the current timestamp is written to the Redis key `product_id:current_obs:obs_end_time`. The target selector state is set to `processing`, and the sources are added to the database.
 
 ```
-def store_metadata(self, product_id):
+def store_metadata(self, product_id, mode):
     [...]
-    pool_resources = self._get_sensor_value(product_id, "current_obs:pool_resources")
-    antennas = ','.join(re.findall(r'm\d{3}', pool_resources))
-    proxies = ','.join(re.findall(r'[a-z A-Z]+_\d', pool_resources))
-    start = self._get_sensor_value(product_id, "current_obs:obs_start_time")
-    end = self._get_sensor_value(product_id, "current_obs:obs_end_time")
-    targets = pd.read_csv(StringIO(self._get_sensor_value(product_id, "current_obs:target_list")), sep=",", index_col=0)
-    current_freq = self._get_sensor_value(product_id, "current_obs:frequency")
-    bands = self.engine._freqBand(current_freq)
-    n_antennas = antennas.count(',') + 1
-    file_id = 'filler_file_id'
-    self.engine.add_sources_to_db(targets, start, end, proxies, antennas, n_antennas, file_id, bands)
+    if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
+        if (pStatus.proc_status == "ready") or (mode == "next_64"):
+            if mode == "new_sample":
+                [...]
+                obs_end_time = datetime.now(pytz.utc)
+                write_pair_redis(self.redis_server, "{}:current_obs:obs_end_time".format(product_id), str(obs_end_time))
+                pStatus.proc_status = "processing"
+                [...]
+                self.engine.add_sources_to_db(targets, coords, start, end, proxies, antennas, n_antennas, file_id, bands)
 ```
 
-#### `sensor_alerts` -> `product_id:acknowledge_source_id_[...]`
+While the target selector is in the `processing` state, the `[...]:new_obs:[...]` Redis keys are continually updated with incoming status messages, while the `[...]:current_obs:[...]` Redis keys remain the same until confirmation is received from the processing nodes that processing of the current block has either been aborted or concluded successfully.
 
-These messages indicate the successful receipt & onset of processing of individual sources contained in the currently processing observation block by the processing nodes. Once receipt of the final target in the published list is acknowledged, if the start time of processing is not already stored, the current timestamp is written to the Redis key `product_id:current_obs:proc_start_time`. This is subsequently used to define abort criteria for the total processing time.
+If a `capture-start` message is received while the previously published target list is still being processed by the back-end (and consequently the target selector is in the `processing` state), the function calculates a target list from the data contained under the `product_id:new_obs:*` Redis keys, without overwriting the `product_id:current_obs:*` keys. We define a "To Be Determined Figure of Merit", or TBDFM, where for each source, its TBDFM value is
 
-```
-def _acknowledge(self, message):
+```        
+for q in table.index:
     [...]
-    if get_redis_key(self.redis_server, "{}:current_obs:proc_start_time".format(product_id)) is None\
-            and self.reformat_table(q)['source_id'].iloc[-1].lstrip() in message:
+    gcd = great_circle_distance(point_1, point_2)
+    beam_fwhm = np.rad2deg((con.c / float(frequency)) / 13.5)
+    proportional_offset = gcd / beam_fwhm
+    primary_sensitivity = cosine_attenuation(proportional_offset)
+    # One target of priority n is worth priority_decay targets of priority n+1.
+    # priority_decay() = 10
+    # primary_sensitivity_exponent() = 1
+    tbdfm_param[q] = int((primary_sensitivity ** primary_sensitivity_exponent()) * priority_decay() ** (7 - table['priority'][q]))
+```
+
+The primary beam sensitivity drops off with increasing distance from the pointing centre, following a cosine attenuation pattern; this combined with the source priority values presented earlier allows us to determine the relative importance of individual sources with regards to achieving the project aims. By also taking the sum TBDFM value for all sources visible in each field, we can also compare the importance of pointings as a whole.
+
+If the sum TBDFM is larger for the new pointing (`tot_new_tbdfm > tot_current_tbdfm`), processing of the current block is aborted, and the list of new target coordinates is sent to the optimizer to be published to the processing nodes. If the sum TBDFM is smaller for the new pointing, processing of the current block continues.
+
+```
+def _capture_start(self, message):
+    [...]
+    elif pStatus.proc_status == "processing":
+        self.fetch_data(product_id, mode="new_obs")
         [...]
-        proc_start_time = datetime.now()
-        write_pair_redis(self.redis_server, "{}:current_obs:proc_start_time".format(product_id), str(proc_start_time))
-```
-```
-[2021-04-07 13:14:16,490 - INFO - mk_redis.py:529] Receipt of all targets confirmed by processing nodes
+        if "None" not in str(self._get_sensor_value(product_id, "new_obs:target_list")):
+            appended_new = self.append_tbdfm(new_target_list, new_coords, new_frequency)
+            [...]
+            appended_current = self.append_tbdfm(current_target_list, current_coords, current_frequency)
+            [...]
+            tot_new_tbdfm = appended_new['tbdfm_param'].sum()
+            [...]
+            tot_current_tbdfm = appended_current['tbdfm_param'].sum()
+            [...]
+            if tot_new_tbdfm > tot_current_tbdfm:
+                self.abort_criteria(product_id)
+                write_pair_redis(self.redis_server, "{}:current_obs:coords".format(product_id),
+                                 self._get_sensor_value(product_id, "new_obs:coords"))
+                write_pair_redis(self.redis_server, "{}:current_obs:frequency".format(product_id),
+                                 self._get_sensor_value(product_id, "new_obs:frequency"))
+                write_pair_redis(self.redis_server, "{}:current_obs:pool_resources".format(product_id),
+                                 self._get_sensor_value(product_id, "new_obs:pool_resources"))
+                write_pair_redis(self.redis_server, "{}:current_obs:target_list".format(product_id),
+                                 self._get_sensor_value(product_id, "new_obs:target_list"))
+                [...]
+                if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
+                    sub_arr_id = "0"
+                    pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
+                    obs_start_time = datetime.now(pytz.utc)
+                    write_pair_redis(self.redis_server,
+                                     "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
+                    self._publish_targets(pulled_targets, product_id, sub_arr_id)
 ```
 
-#### `sensor_alerts` -> `product_id:success_source_id_[...]`
+#### `sensor_alerts` -> `product_id:success_[...]`
 
-These messages indicate confirmation of the successful completion of processing of individual sources contained in the currently processing observation block by the processing nodes. The MySQL table containing data on previous observations is then updated to reflect this successful processing. The correct entry to update is identified via the `product_id:current_obs:obs_start_time` timestamp, which confirms that the entry is contained within the currently processing block.
+These messages indicate confirmation of the successful completion of processing of individual beams contained in the currently processing observation block by the processing nodes. The MySQL table containing data on previous observations is then updated to reflect this successful processing. The correct entry to update is identified via the `product_id:current_obs:obs_start_time` timestamp, which confirms that the entry is contained within the currently processing block.
 
 ```
 def _processing_success(self, message):
@@ -326,17 +382,36 @@ def _processing_success(self, message):
     self.engine.update_obs_status(source_id, 
                                   obs_start_time=str(self.round_time
                                                      (self._get_sensor_value
-                                                      (product_id, "current_obs:obs_start_time"))), processed='TRUE')
+                                                      (product_id, "current_obs:obs_start_time"))),
+                                  beamform_ra=ra,
+                                  beamform_decl=decl,
+                                  processed='TRUE')
+    [...]
+    processing_beams = json.loads(self._get_sensor_value(product_id, "current_obs:processing_beams"))
+    [...]
+    matching_ra = ["{:0.4f}".format(float(item)) for item in processing_beams['ra']]
+    if ra in matching_ra:
+        idx_ra = matching_ra.index(ra)
+        keys_64 = ['ra', 'decl', 'source_id', 'contained_dist_c', 'contained_table', 'contained_priority']
+        for j in keys_64:
+            to_rm = processing_beams.get(j)
+            del to_rm[idx_ra]
+    [...]
+    write_pair_redis(
+        self.redis_server,
+        "{}:current_obs:processing_beams".format(product_id), json.dumps(processing_beams))
 ```
 
-The receipt of such a message for every source in the published list of targets indicates successful processing of all sources. Accordingly, all `[...]:current_obs:[...]` Redis keys are deleted, and the processing state of the target selector is set to `ready`.
+The receipt of such a message for every source in the published list of targets indicates successful processing of all 64 beams. Accordingly, the source priorities are recalculated, and the beams are reoptimized; these new beam coordinates are published to the processing nodes, and the metadata for them is stored in the corresponding MySQL table.
 
 ```
-if number_processed == number_to_process:
-    logger.info("Confirmation of successful processing of all sources received from processing nodes")
-    self._deconfigure(product_id)
-    pStatus.proc_status = "ready"
-    logger.info("Processing state set to \'ready\'")
+    if not len(processing_beams['ra']):
+        logger.info("Successful processing of 64 beamforming coordinates confirmed by processing nodes. "
+                    "Calculating next 64")
+        self.fetch_data(product_id, mode="recalculating")
+        self._publish_targets(json.loads(self._get_sensor_value(product_id, "current_obs:target_list")),
+                              product_id)
+        self.store_metadata(product_id, mode="next_64")
 ```
 ```
 [2021-04-07 13:14:31,492 - INFO - mk_redis.py:496] Confirmation of successful processing of all sources received from processing nodes
@@ -344,21 +419,7 @@ if number_processed == number_to_process:
 [2021-04-07 13:14:31,526 - INFO - mk_redis.py:499] Processing state set to 'ready'
 ```
 
-If the processing time elapsed (calculated from `product_id:current_obs:proc_start_time`) exceeds 10 minutes with over 90% of sources successfully processed, or if the processing time elapsed exceeds both 20 minutes and 2t<sub>obs</sub> - 5 minutes (where t<sub>obs</sub> is the total time of observation), processing is aborted; all `[...]:current_obs:[...]` Redis keys are deleted, and the processing state of the target selector is set to `ready`.
-
-```
-if (fraction_processed > 0.9) and (time_elapsed > 600):
-    logger.info("Processing time has exceeded 10 minutes, with >90% of targets processed successfully. Aborting")
-    self._deconfigure(product_id)
-    pStatus.proc_status = "ready"
-    logger.info("Processing state set to \'ready\'")
-[...]
-if (time_elapsed > 1200) and (time_elapsed > (2 * observation_time) - 300):
-    logger.info("Processing time has exceeded both 20 and (2t_obs - 5) minutes. Aborting")
-    self._deconfigure(product_id)
-    pStatus.proc_status = "ready"
-    logger.info("Processing state set to \'ready\'")
-```
+[# TODO: UPDATE SECTION ON ABORT CRITERIA]
 
 ### Redis key-value pairs
 
@@ -382,16 +443,18 @@ These store the metadata for the currently processing block, and are not changed
 * `product_id:current_obs:frequency`, i.e. `10000000000`
 * `product_id:current_obs:obs_start_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. Currently this is used to calculate t<sub>obs</sub>, as well as in addition to the source_id to identify which sources from the previously observed table to update upon receipt of successful processing messages. The first use case will be obsolete/unnecessary once we have or simulate t<sub>obs</sub> messages from the processing nodes.
 * `product_id:current_obs:obs_end_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. This is only used to calculate t<sub>obs</sub>, and will thus be unnecessary as above.
-* `product_id:current_obs:proc_start_time`, datetime object parsed as string i.e. `2021-03-25 21:40:11.11111`. Set at the moment the processing nodes confirm receipt of the last target in the published block, and used to calculate processing duration for the abort criteria.
-* `product_id:current_obs:target_list`, dataframe containing targets in the currently processing block , parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../123456789,A,B,C,.../[...]`
-* `product_id:current_obs:remaining_to_process`, dataframe containing targets from the currently processing block for which confirmation of successful processing has not yet been received, parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../987654321,D,E,F,.../[...]`
+* `product_id:current_obs:target_list`, dataframe containing targets in the currently processing block, parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../123456789,A,B,C,.../[...]`
+* `product_id:current_obs:beamform_beams`, dataframe containing optimised beamforming coordinates in the currently processing block, along with the Gaia DR2 sources contained within each formed beam, parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../123456789,A,B,C,.../[...]`
+* `product_id:current_obs:beamform_targets`, dataframe containing all Gaia DR2 sources contained within the optimised beams in the currently processing block, parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../123456789,A,B,C,.../[...]`
+* `product_id:current_obs:processing_beams`, dataframe containing optimised beamforming coordinates in the currently processing block that are yet to complete processing, parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../123456789,A,B,C,.../[...]`
+* `product_id:current_obs:unacknowledged_beams`, dataframe containing optimised beamforming coordinates in the currently processing block yet to be acknowledged as received by the processing nodes, parsed as a csv-formatted string, i.e. `source_id,ra,dec,dist_c,.../123456789,A,B,C,.../[...]`
 
 There will also need to be two additional key-value pairs (one for the current telescope status, and one for the current observation block) to store the pointing number from the schedule block.
 
-Lastly, there are two more key-value pair formats used, for messages from the processing nodes acknowledging the receipt of targets and successful processing; these of course can be changed to whatever format is required.
+Lastly, there are two more key-value pair formats used, for messages from the processing nodes acknowledging the receipt of target beam coordinates and their successful processing; these of course can be changed to whatever format is required.
 
-* `product_id:acknowledge_source_id_123456789`, value `True`
-* `product_id:success_source_id_123456789`, value `True`
+* `product_id:acknowledge_51.5772_-33.9767`, value `True`
+* `product_id:success_51.5772_-33.9767`, value `True`
 
 ## Next steps
 
@@ -401,7 +464,7 @@ Subsequent steps include:
 * Further developing schedule block functionality, to be able to plan for upcoming observations in real-time.
 * In actual operation, the beginning and end of observation will not be indicated by `capture` messages but by `tracking` messages. Once these messages are either simulated or implemented, actions currently undertaken on receipt of `capture` messages will be changed.
 * Total useful observation time can only be given by the processing nodes, and not calculated by the target selector. Accordingly, once this observation time is either implemented or simulated, `product_id:current_obs:obs_start_time` will no longer be calculated as before and `product_id:current_obs:obs_end_time` will become obsolete.
-* More advanced and comprehensive testing of the functionality in a realistic environment, perhaps testing on-site.
+* More advanced and comprehensive testing of the functionality in a realistic environment, as well as testing on-site.
 * Adapting the target selector to VLA set-up.
 
 ## References
