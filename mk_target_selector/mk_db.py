@@ -214,12 +214,6 @@ class Triage(DatabaseHandler):
             None
         """
 
-        # print(str(obs_start_time))
-        # if float(str(obs_start_time).split(":", 2)[2]) > 59.5:
-        #     round_m = float(str(obs_start_time).split(":", 2)[1]) + 1
-        #     round_s = "00"
-        #     obs_start_time = "{}:{}:{}".format(str(obs_start_time).split(":", 2)[0], round_m, round_s)
-
         update = """\
                     UPDATE {table}
                     SET processed = {processed}
@@ -229,6 +223,8 @@ class Triage(DatabaseHandler):
                             beamform_decl=beamform_decl,
                             time=parser.parse(obs_start_time),
                             processed=processed)
+
+        logger.info("\n{}\n".format(update))
 
         self.conn.execute(update)
 

@@ -552,8 +552,8 @@ class Listen(threading.Thread):
 
         self.engine.update_obs_status(obs_start_time=str(self._get_sensor_value(product_id,
                                                                                 "current_obs:obs_start_time")),
-                                      beamform_ra=ra,
-                                      beamform_decl=decl,
+                                      beamform_ra=str(ra),
+                                      beamform_decl=str(decl),
                                       processed='TRUE')
 
         processing_beams = json.loads(self._get_sensor_value(product_id, "current_obs:processing_beams"))

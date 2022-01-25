@@ -32,8 +32,8 @@ class Optimizer(object):
         self.coordinates = coordinates
         self.pool = pool
         self.possible_targets = possible_targets
-        # self.time = time
-        self.time = "2021-11-15 07:46:17.828295+00:00"
+        self.time = time
+        # self.time = "2021-11-15 07:46:17.828295+00:00"
 
         # For each of the following config options, we prioritize:
         # 1. A setting the caller explicitly set

@@ -9,6 +9,7 @@ import os
 import yaml
 import pandas as pd
 import numpy as np
+from csv import reader
 from getpass import getpass
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
@@ -51,8 +52,8 @@ class Observation(Base):
     # time = Column(TIMESTAMP)
     time = Column(VARCHAR(45))
     processed = Column(Text)
-    beamform_ra = Column(FLOAT)
-    beamform_decl = Column(FLOAT)
+    beamform_ra = Column(VARCHAR(45))
+    beamform_decl = Column(VARCHAR(45))
     primary_ra = Column(FLOAT)
     primary_decl = Column(FLOAT)
 
@@ -164,12 +165,13 @@ def main(user, password, host, schema_name):
     # Create 26m targets table
     if not engine.dialect.has_table(engine, source_table_name):
         print('Creating table: {}'.format(source_table_name))
-        tb = pd.read_csv(data_link)
-        tb.to_sql(source_table_name, engine, index=False,
-                  if_exists='replace', chunksize=None, dtype={'source_id': VARCHAR(45)})
-        # engine.execute('CREATE INDEX target_list_loc_idx ON \
-        #                 {}.{} (ra, decl)'.format(schema_name, source_table_name))
-        del tb
+        for chunk in pd.read_csv(data_link, chunksize=1e6):
+            print("point1")
+            chunk.to_sql(source_table_name, engine, index=False,
+                         if_exists='append', chunksize=None, dtype={'source_id': VARCHAR(45)})
+            print("point2")
+            del chunk
+        print("point3")
         engine.execute('ALTER TABLE {}.{} ADD INDEX idx_ra_decl (ra, decl);'.format(schema_name, source_table_name))
         engine.execute('ALTER TABLE {}.{} ADD INDEX idx_decl_ra (decl, ra);'.format(schema_name, source_table_name))
 
