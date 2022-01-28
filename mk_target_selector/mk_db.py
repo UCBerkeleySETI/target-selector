@@ -224,7 +224,7 @@ class Triage(DatabaseHandler):
                             time=parser.parse(obs_start_time),
                             processed=processed)
 
-        logger.info("\n{}\n".format(update))
+        # logger.info("\n{}\n".format(update))
 
         self.conn.execute(update)
 

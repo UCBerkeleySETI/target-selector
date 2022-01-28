@@ -1,0 +1,5 @@
+array_1:target:radec, -07:58:28.29, -40:47:58.6
+array_1:subarray_1_streams_wide_antenna_channelised_voltage_centre_frequency
+array_1:subarray_1_pool_resources
+capture-start:array_1
+capture-stop:array_1
