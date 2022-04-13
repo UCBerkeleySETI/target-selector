@@ -1,7 +1,7 @@
 import setuptools
 
 requires = [
-    # "astropy>=2.0.12",
+    "astropy>=2.0.12",
     # "setuptools>=41.0.0",
     "SQLAlchemy>=1.3.24",
     "redis>=2.10.6",
