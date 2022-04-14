@@ -93,7 +93,8 @@ class Listen(threading.Thread):
     def __init__(self, chan=None, config_file='target_selector.yml'):
 
         if not chan:
-            chan = ['sensor_alerts', 'alerts']
+            # In future only one channel will be used: `target-selector`
+            chan = ['target-selector']
 
         threading.Thread.__init__(self)
 
@@ -108,8 +109,11 @@ class Listen(threading.Thread):
         self.engine = Triage(config_file)
 
         self.channel_actions = {
-            'alerts': self._alerts,
-            'sensor_alerts': self._sensor_alerts,
+            #'alerts': self._alerts,
+            #'sensor_alerts': self._sensor_alerts,
+            # Temporarily map channel `target-selector` to `alerts` channel
+            # In future will not use `alerts` or `sensor_alerts` channels
+            'target-selector': self._alerts,
         }
 
         self.alerts_actions = {
@@ -119,7 +123,8 @@ class Listen(threading.Thread):
             # 'configure': self._configure,
             'conf_complete': self._pass,
             'capture-init': self._pass,
-            'capture-start': self._capture_start,
+            # Temporarily map `new-target` to `_capture_start`
+            'new-target': self._capture_start,
             'capture-stop': self._capture_stop,
             'capture-done': self._pass,
         }
@@ -146,7 +151,7 @@ class Listen(threading.Thread):
         for item in self.p.listen():
             self._message_to_func(item['channel'], self.channel_actions)(item['data'])
 
-    def fetch_data(self, product_id, mode):
+    def fetch_data(self, product_id, src_name, RA, Dec, mode):
         """Fetches telescope status data and selects targets when telescope status data is stored
 
         Parameters:
@@ -183,11 +188,14 @@ class Listen(threading.Thread):
                     and ("None" not in str(self._get_sensor_value(product_id, "new_obs:pool_resources"))):
                 try:
                     # create redis key-val pairs to store current observation data & current telescope status data
-                    new_coords = self._get_sensor_value(product_id, "new_obs:coords")
-                    coords_ra = float(new_coords.split(", ")[0])
-                    coords_dec = float(new_coords.split(", ")[1])
-                    new_freq = self._get_sensor_value(product_id, "new_obs:frequency")
-                    new_pool = self._get_sensor_value(product_id, "new_obs:pool_resources")
+                    #new_coords = self._get_sensor_value(product_id, "new_obs:coords")
+                    #coords_ra = float(new_coords.split(", ")[0])
+                    #coords_dec = float(new_coords.split(", ")[1])
+                    coords_ra = RA
+                    coords_dec = Dec
+                    new_coords = '{}, {}'.format(RA, Dec)
+                    new_freq = 'test-freq' #self._get_sensor_value(product_id, "new_obs:frequency")
+                    new_pool = 'test-pool-resources' #self._get_sensor_value(product_id, "new_obs:pool_resources")
 
                     if mode == "current_obs":
                         # logger.info("Writing values of [{}:new_obs:*] to [{}:current_obs:*]"
@@ -298,11 +306,16 @@ class Listen(threading.Thread):
             None
         """
 
+        # Get new targets info:
+        targets_info = self.redis_server.get('new-target-info')
+        product_id, src_name, RA, Dec, obsid = targets_info.split(':')
+        
+
         logger.info("Capture start message received: {}".format(message))
         product_id = message.split(":")[-1]
 
         if pStatus.proc_status == "ready":
-            self.fetch_data(product_id, mode="current_obs")
+            self.fetch_data(product_id, src_name, RA, Dec, mode="current_obs")
             if "None" not in str(self._get_sensor_value(product_id, "current_obs:target_list")):
                 sub_arr_id = "0"  # TODO: CHANGE TO HANDLE SUB-ARRAYS
                 pulled_targets = json.loads(self._get_sensor_value(product_id, "current_obs:target_list"))
@@ -313,11 +326,11 @@ class Listen(threading.Thread):
                 write_pair_redis(self.redis_server,
                                  "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
-                self._publish_targets(pulled_targets, product_id, sub_arr_id)
+                self._publish_targets(obsid, pulled_targets, product_id, sub_arr_id)
 
         elif pStatus.proc_status == "processing":
             logger.info("Still processing previous pointing. Checking abort criteria")
-            self.fetch_data(product_id, mode="new_obs")
+            self.fetch_data(product_id, src_name, RA, Dec, mode="new_obs")
             if "None" not in str(self._get_sensor_value(product_id, "new_obs:target_list")):
 
                 # read in and format new target list from redis key to dataframe
@@ -372,7 +385,7 @@ class Listen(threading.Thread):
                         write_pair_redis(self.redis_server,
                                          "{}:current_obs:obs_start_time".format(product_id), str(obs_start_time))
 
-                        self._publish_targets(pulled_targets, product_id, sub_arr_id)
+                        self._publish_targets(obsid, pulled_targets, product_id, sub_arr_id)
 
                 elif tot_new_tbdfm <= tot_current_tbdfm:
                     logger.info("New pointing does not contain sources with a higher total TBDFM "
@@ -962,7 +975,7 @@ class Listen(threading.Thread):
         beam_rad = 0.5 * (con.c / float(current_freq)) / dish_size
         return beam_rad
 
-    def _publish_targets(self, targets, product_id, columns=None,
+    def _publish_targets(self, targets_key, targets, product_id, columns=None,
                          sub_arr_id=0, sensor_name='targets'):
         """Reformat the table returned from target searching
 
@@ -1043,10 +1056,12 @@ class Listen(threading.Thread):
                 beamform_targets['priority'].append(7)
                 beamform_targets['table_name'].append('spare_beams')
 
-        key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
+        #key = '{}:pointing_{}:{}'.format(product_id, sub_arr_id, sensor_name)
+        key = targets_key 
         key_beams_processing = '{}:current_obs:processing_beams'.format(product_id)
         key_beams_unacknowledged = '{}:current_obs:unacknowledged_beams'.format(product_id)
-        channel = "bluse:///set"
+        # For now, publish to `target-selector`
+        channel = "target-selector"
         # write tables to redis
         write_pair_redis(self.redis_server, key, json.dumps(targets))
         write_pair_redis(self.redis_server, key_beams_processing, json.dumps(beamform_beams))
